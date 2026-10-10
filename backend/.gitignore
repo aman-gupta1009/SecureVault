@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary files
+storage/temp/*
+storage/quarantine/*
+
+# Private encrypted files
+storage/encrypted/*
+
+# Local development files
+.DS_Store
+Thumbs.db

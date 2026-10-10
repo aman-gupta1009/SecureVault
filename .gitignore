@@ -1,0 +1,30 @@
+# Node.js dependencies
+backend/node_modules/
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# SecureVault private storage
+backend/storage/temp/*
+backend/storage/quarantine/*
+backend/storage/encrypted/*
+
+# Windows and editor files
+desktop.ini
+Thumbs.db
+.DS_Store
+.vscode/
+
+
+
+# SecureVault private files and backups
+backend/storage/
