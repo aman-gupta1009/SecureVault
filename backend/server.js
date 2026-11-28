@@ -1,14 +1,23 @@
-require("dotenv").config();
+
+require("dotenv").config({
+    path: require("path").resolve(__dirname, "../.env")
+});
+
+const deviceSessionRoutes = require("./routes/deviceSessionRoutes");
 
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const rateLimit = require("express-rate-limit");
 
+const passwordManagerRoutes = require("./routes/passwordManagerRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
+
 const securityMiddleware = require("./middleware/securityMiddleware");
 const errorMiddleware = require("./middleware/errorMiddleware");
 
 const backupRoutes = require("./routes/backupRoutes");
+
 const {
     startSessionCleanupJob
 } = require("./services/sessionService");
@@ -34,12 +43,13 @@ const sharedFileRoutes =
 const vaultLockRoutes =
     require("./routes/vaultLockRoutes");
 
-
 const app = express();
 
-const PORT = Number(
-    process.env.PORT || 4000
-);
+const PORT = Number(process.env.PORT || 4000);
+
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+    throw new Error("Invalid PORT configuration");
+}
 
 
 // =====================================================
@@ -106,6 +116,7 @@ const globalRateLimiter = rateLimit({
 
 app.use(globalRateLimiter);
 
+
 // =====================================================
 // PUBLIC SHARE ACCESS RATE LIMITER
 // =====================================================
@@ -125,6 +136,8 @@ const shareAccessRateLimiter = rateLimit({
             "Too many share access requests. Please try again later."
     }
 });
+
+
 // =====================================================
 // API ROUTES
 // =====================================================
@@ -139,14 +152,25 @@ app.use(
     authRoutes
 );
 
-app.use("/api/security", securityRoutes);
+app.use(
+    "/api/security",
+    securityRoutes
+);
 
 app.use(
     "/api/vault",
     vaultRoutes
 );
 
-app.use("/api/shares", shareRoutes);
+app.use(
+    "/api/device-sessions",
+    deviceSessionRoutes
+);
+
+app.use(
+    "/api/shares",
+    shareRoutes
+);
 
 app.use(
     "/api/shares/access",
@@ -154,12 +178,31 @@ app.use(
     sharedFileRoutes
 );
 
-app.use("/api/backups", backupRoutes);
+app.use(
+    "/api/backups",
+    backupRoutes
+);
 
 app.use(
     "/api/vault-lock",
     vaultLockRoutes
 );
+
+app.use(
+    "/api/password-manager",
+    passwordManagerRoutes
+);
+
+// =====================================================
+// NOTIFICATIONS MODULE
+// =====================================================
+
+app.use(
+    "/api/notifications",
+    notificationRoutes
+);
+
+
 // =====================================================
 // 404 HANDLER
 // =====================================================
@@ -179,7 +222,6 @@ app.use((req, res) => {
 // =====================================================
 
 app.use(errorMiddleware);
-
 
 
 // =====================================================
@@ -214,7 +256,7 @@ async function startServer() {
             );
 
             console.log(
-                "       🔐 SECUREVAULT SERVER"
+                "       SECUREVAULT SERVER"
             );
 
             console.log(
@@ -222,11 +264,15 @@ async function startServer() {
             );
 
             console.log(
-                `🚀 Server: http://localhost:${PORT}`
+                `Server: http://localhost:${PORT}`
             );
 
             console.log(
-                `❤️ Health: http://localhost:${PORT}/api/health`
+                `Health: http://localhost:${PORT}/api/health`
+            );
+
+            console.log(
+                `Notifications: http://localhost:${PORT}/api/notifications`
             );
 
             console.log(
@@ -240,7 +286,7 @@ async function startServer() {
     } catch (error) {
 
         console.error(
-            "❌ Failed to start SecureVault"
+            "Failed to start SecureVault"
         );
 
         console.error(
@@ -251,6 +297,4 @@ async function startServer() {
     }
 }
 
-
 startServer();
-

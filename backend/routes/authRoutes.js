@@ -2,7 +2,7 @@
 const express = require("express");
 const router = express.Router();
 
-// Existing authentication controller
+// Authentication controller.
 const {
     register,
     verifyRegistrationOTP,
@@ -13,31 +13,89 @@ const {
     getCurrentUser
 } = require("../controllers/authController");
 
-// Password recovery controller
+// Password recovery controller.
 const {
     requestPasswordRecovery,
     verifyPasswordRecoveryOTP,
     resetPassword
 } = require("../controllers/passwordRecoveryController");
 
-// Authentication middleware
+// Authentication middleware.
 const authMiddleware = require("../middleware/authMiddleware");
 
-// Registration
-router.post("/register", register);
-router.post("/verify-otp", verifyRegistrationOTP);
-router.post("/resend-otp", resendRegistrationOTP);
+// Dedicated authentication rate limiters.
+const {
+    loginRateLimiter,
+    registrationRateLimiter,
+    otpVerificationRateLimiter,
+    otpResendRateLimiter,
+    passwordRecoveryRateLimiter,
+    passwordRecoveryVerificationRateLimiter,
+    passwordResetRateLimiter
+} = require("../middleware/authRateLimiters");
 
-// Login and session management
-router.post("/login", login);
-router.get("/me", authMiddleware, getCurrentUser);
-router.post("/logout", authMiddleware, logout);
-router.post("/logout-all", authMiddleware, logoutAll);
+// Registration.
+router.post(
+    "/register",
+    registrationRateLimiter,
+    register
+);
 
-// Password recovery
-router.post("/forgot-password", requestPasswordRecovery);
-router.post("/verify-reset-otp", verifyPasswordRecoveryOTP);
-router.post("/reset-password", resetPassword);
+router.post(
+    "/verify-otp",
+    otpVerificationRateLimiter,
+    verifyRegistrationOTP
+);
+
+router.post(
+    "/resend-otp",
+    otpResendRateLimiter,
+    resendRegistrationOTP
+);
+
+// Login.
+router.post(
+    "/login",
+    loginRateLimiter,
+    login
+);
+
+// Authenticated user and session management.
+router.get(
+    "/me",
+    authMiddleware,
+    getCurrentUser
+);
+
+router.post(
+    "/logout",
+    authMiddleware,
+    logout
+);
+
+router.post(
+    "/logout-all",
+    authMiddleware,
+    logoutAll
+);
+
+// Password recovery.
+router.post(
+    "/forgot-password",
+    passwordRecoveryRateLimiter,
+    requestPasswordRecovery
+);
+
+router.post(
+    "/verify-reset-otp",
+    passwordRecoveryVerificationRateLimiter,
+    verifyPasswordRecoveryOTP
+);
+
+router.post(
+    "/reset-password",
+    passwordResetRateLimiter,
+    resetPassword
+);
 
 module.exports = router;
-

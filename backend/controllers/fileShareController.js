@@ -1,7 +1,9 @@
+
 const {
     createFileShare,
     revokeFileShare,
-    getUserFileShares
+    getUserFileShares,
+    getShareActivity
 } = require("../services/fileShareService");
 
 const {
@@ -16,21 +18,55 @@ const {
     logSecurityEvent
 } = require("../services/securityEventService");
 
+const {
+    sendShareInvitationEmail
+} = require("../services/emailService");
+
 
 /*
 |--------------------------------------------------------------------------
-| CREATE FILE SHARE
+| BUILD SHARE URL
+|--------------------------------------------------------------------------
+*/
+
+function buildShareUrl(shareToken) {
+    const frontendUrl = String(
+        process.env.FRONTEND_URL || ""
+    ).trim();
+
+    if (!frontendUrl) {
+        throw new Error("FRONTEND_URL_NOT_CONFIGURED");
+    }
+
+    let parsedUrl;
+
+    try {
+        parsedUrl = new URL(frontendUrl);
+    } catch {
+        throw new Error("INVALID_FRONTEND_URL");
+    }
+
+    if (
+        !["http:", "https:"].includes(parsedUrl.protocol) ||
+        parsedUrl.username ||
+        parsedUrl.password ||
+        parsedUrl.search ||
+        parsedUrl.hash
+    ) {
+        throw new Error("INVALID_FRONTEND_URL");
+    }
+
+    const baseUrl = frontendUrl.replace(/\/+$/, "");
+
+    return `${baseUrl}/share/${encodeURIComponent(shareToken)}`;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| CREATE AND SEND FILE SHARE INVITATION
 |--------------------------------------------------------------------------
 | POST /api/shares
-|
-| Body:
-| {
-|   "fileId": 5,
-|   "recipientEmail": "user@example.com",
-|   "expiresInMinutes": 60,
-|   "maxDownloads": 5
-| }
-|
 |--------------------------------------------------------------------------
 */
 
@@ -42,10 +78,20 @@ async function createShare(req, res, next) {
 
         const recipientEmail =
             req.body.recipientEmail === undefined ||
-            req.body.recipientEmail === null ||
-            req.body.recipientEmail === ""
+            req.body.recipientEmail === null
+                ? ""
+                : String(req.body.recipientEmail)
+                    .trim()
+                    .toLowerCase();
+
+        const rawExpiresAt = req.body.expiresAt;
+
+        const expiresAt =
+            rawExpiresAt === undefined ||
+            rawExpiresAt === null ||
+            rawExpiresAt === ""
                 ? null
-                : String(req.body.recipientEmail).trim();
+                : rawExpiresAt;
 
         const expiresInMinutes =
             req.body.expiresInMinutes === undefined ||
@@ -61,13 +107,32 @@ async function createShare(req, res, next) {
                 ? null
                 : Number(req.body.maxDownloads);
 
+        const maxOpens =
+            req.body.maxOpens === undefined ||
+            req.body.maxOpens === null ||
+            req.body.maxOpens === ""
+                ? null
+                : Number(req.body.maxOpens);
+
+        const permissionType =
+            req.body.permissionType === undefined
+                ? ""
+                : String(req.body.permissionType)
+                    .trim()
+                    .toUpperCase();
+
+        const watermarkEnabled =
+            req.body.watermarkEnabled === undefined
+                ? false
+                : req.body.watermarkEnabled;
+
 
         // ---------------------------------------------------------------
         // FILE ID VALIDATION
         // ---------------------------------------------------------------
 
         if (
-            !Number.isInteger(fileId) ||
+            !Number.isSafeInteger(fileId) ||
             fileId < 1
         ) {
             return res.status(400).json({
@@ -81,25 +146,79 @@ async function createShare(req, res, next) {
         // RECIPIENT EMAIL VALIDATION
         // ---------------------------------------------------------------
 
-        if (recipientEmail !== null) {
-            if (
-                recipientEmail.length === 0 ||
-                recipientEmail.length > 255 ||
-                !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-                    recipientEmail
-                )
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid recipientEmail."
-                });
-            }
+        if (
+            recipientEmail.length === 0 ||
+            recipientEmail.length > 255 ||
+            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+                recipientEmail
+            )
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "A valid recipientEmail is required to send the invitation."
+            });
+        }
+
+
+        // ---------------------------------------------------------------
+        // PERMISSION VALIDATION
+        // ---------------------------------------------------------------
+
+        if (
+            !["VIEW", "DOWNLOAD"].includes(permissionType)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "permissionType must be VIEW or DOWNLOAD."
+            });
+        }
+
+
+        // ---------------------------------------------------------------
+        // WATERMARK VALIDATION
+        // ---------------------------------------------------------------
+
+        if (typeof watermarkEnabled !== "boolean") {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "watermarkEnabled must be true or false."
+            });
         }
 
 
         // ---------------------------------------------------------------
         // EXPIRATION VALIDATION
         // ---------------------------------------------------------------
+
+        if (
+            expiresAt !== null &&
+            expiresInMinutes !== null
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Provide either expiresAt or expiresInMinutes, not both."
+            });
+        }
+
+        if (expiresAt !== null) {
+            const expiryTimestamp =
+                new Date(expiresAt).getTime();
+
+            if (
+                !Number.isFinite(expiryTimestamp) ||
+                expiryTimestamp <= Date.now()
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "expiresAt must be a valid future date and time."
+                });
+            }
+        }
 
         if (expiresInMinutes !== null) {
             if (
@@ -136,6 +255,47 @@ async function createShare(req, res, next) {
 
 
         // ---------------------------------------------------------------
+        // OPEN LIMIT VALIDATION
+        // ---------------------------------------------------------------
+
+        if (maxOpens !== null) {
+            if (
+                !Number.isInteger(maxOpens) ||
+                maxOpens < 1 ||
+                maxOpens > 10000
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "maxOpens must be between 1 and 10000."
+                });
+            }
+        }
+
+
+        // ---------------------------------------------------------------
+        // VALIDATE FRONTEND URL BEFORE CREATING SHARE
+        // ---------------------------------------------------------------
+
+        try {
+            buildShareUrl("validation-token");
+        } catch (error) {
+            if (
+                error.message === "FRONTEND_URL_NOT_CONFIGURED" ||
+                error.message === "INVALID_FRONTEND_URL"
+            ) {
+                return res.status(500).json({
+                    success: false,
+                    message:
+                        "Share invitation URL is not configured correctly."
+                });
+            }
+
+            throw error;
+        }
+
+
+        // ---------------------------------------------------------------
         // VAULT MUST BE UNLOCKED
         // ---------------------------------------------------------------
 
@@ -163,24 +323,79 @@ async function createShare(req, res, next) {
 
 
         // ---------------------------------------------------------------
-        // CALCULATE EXPIRATION
-        // ---------------------------------------------------------------
-
-        
-
-
-        // ---------------------------------------------------------------
         // CREATE SHARE
         // ---------------------------------------------------------------
 
-        const share =
-    await createFileShare({
-        fileId,
-        ownerUserId: userId,
-        recipientEmail,
-        expiresInMinutes,
-        maxDownloads
-    });
+        const share = await createFileShare({
+            fileId,
+            ownerUserId: userId,
+            recipientEmail,
+            expiresAt,
+            expiresInMinutes,
+            maxDownloads,
+            maxOpens,
+            permissionType,
+            watermarkEnabled
+        });
+
+
+        // ---------------------------------------------------------------
+        // SEND EMAIL INVITATION
+        // ---------------------------------------------------------------
+
+        const shareUrl = buildShareUrl(
+            share.shareToken
+        );
+
+        try {
+            await sendShareInvitationEmail({
+                email: recipientEmail,
+                fileName: file.original_name,
+                permissionType: share.permissionType,
+                expiresAt: share.expiresAt
+                    ? new Date(
+                        share.expiresAt
+                    ).toLocaleString("en-IN", {
+                        dateStyle: "medium",
+                        timeStyle: "short"
+                    })
+                    : "No expiry",
+                shareUrl
+            });
+
+        } catch (emailError) {
+
+            console.error(
+                "Share invitation email failed:",
+                emailError.message
+            );
+
+            // Revoke the share if invitation email fails.
+            let revoked = false;
+
+            try {
+                revoked = await revokeFileShare(
+                    userId,
+                    share.shareId
+                );
+            } catch (revokeError) {
+                console.error(
+                    "Failed to revoke share after email failure:",
+                    revokeError.message
+                );
+            }
+
+            return res.status(502).json({
+                success: false,
+                message: revoked
+                    ? "Invitation email could not be sent. The share has been revoked."
+                    : "Invitation email could not be sent. Please check the share status before trying again.",
+                data: {
+                    shareId: share.shareId,
+                    revoked
+                }
+            });
+        }
 
 
         // ---------------------------------------------------------------
@@ -197,10 +412,15 @@ async function createShare(req, res, next) {
                     fileId,
                     recipientEmail,
                     expiresAt: share.expiresAt,
-                    maxDownloads,
-                    method: "USER_SHARE"
+                    maxDownloads: share.maxDownloads,
+                    maxOpens: share.maxOpens,
+                    permissionType: share.permissionType,
+                    watermarkEnabled: share.watermarkEnabled,
+                    invitationSent: true,
+                    method: "EMAIL_INVITATION"
                 }
             });
+
         } catch (auditError) {
             console.error(
                 "FILE_SHARED audit failed:",
@@ -210,34 +430,62 @@ async function createShare(req, res, next) {
 
 
         // ---------------------------------------------------------------
-        // RESPONSE
+        // SUCCESS RESPONSE
         // ---------------------------------------------------------------
 
         return res.status(201).json({
             success: true,
-            message: "File share created successfully.",
+            message:
+                "Secure share invitation sent successfully.",
             data: {
                 shareId: share.shareId,
                 fileId,
                 fileName: file.original_name,
-                shareToken: share.shareToken,
                 recipientEmail,
+
                 expiresAt: share.expiresAt,
-                maxDownloads,
-                downloadCount: 0,
+
+                permissionType: share.permissionType,
+                watermarkEnabled: share.watermarkEnabled,
+
+                maxDownloads: share.maxDownloads,
+                downloadCount: share.downloadCount,
+
+                maxOpens: share.maxOpens,
+                openCount: share.openCount,
+                remainingOpens: share.remainingOpens,
+
+                invitationSent: true,
                 revoked: false
             }
         });
 
     } catch (error) {
 
-        if (
-            error.message ===
-            "VAULT_LOCKED"
-        ) {
+        if (error.message === "VAULT_LOCKED") {
             return res.status(423).json({
                 success: false,
                 message: "Vault is locked."
+            });
+        }
+
+        const validationErrors = new Set([
+            "INVALID_FILE_ID",
+            "INVALID_OWNER_USER_ID",
+            "INVALID_PERMISSION_TYPE",
+            "INVALID_WATERMARK_SETTING",
+            "INVALID_RECIPIENT_EMAIL",
+            "INVALID_EXPIRES_IN_MINUTES",
+            "INVALID_EXPIRES_AT",
+            "INVALID_MAX_DOWNLOADS",
+            "INVALID_MAX_OPENS",
+            "USE_EITHER_EXPIRES_AT_OR_EXPIRES_IN_MINUTES"
+        ]);
+
+        if (validationErrors.has(error.message)) {
+            return res.status(400).json({
+                success: false,
+                message: error.message
             });
         }
 
@@ -246,13 +494,21 @@ async function createShare(req, res, next) {
 }
 
 
+/*
+|--------------------------------------------------------------------------
+| REVOKE FILE SHARE
+|--------------------------------------------------------------------------
+| DELETE /api/shares/:shareId
+|--------------------------------------------------------------------------
+*/
+
 async function revokeShare(req, res, next) {
     try {
         const userId = req.user.userId;
         const shareId = Number(req.params.shareId);
 
         if (
-            !Number.isInteger(shareId) ||
+            !Number.isSafeInteger(shareId) ||
             shareId < 1
         ) {
             return res.status(400).json({
@@ -261,16 +517,16 @@ async function revokeShare(req, res, next) {
             });
         }
 
-        const revoked =
-            await revokeFileShare(
-                userId,
-                shareId
-            );
+        const revoked = await revokeFileShare(
+            userId,
+            shareId
+        );
 
         if (!revoked) {
             return res.status(404).json({
                 success: false,
-                message: "Share not found or already revoked."
+                message:
+                    "Share not found or already revoked."
             });
         }
 
@@ -304,6 +560,15 @@ async function revokeShare(req, res, next) {
         next(error);
     }
 }
+
+
+/*
+|--------------------------------------------------------------------------
+| LIST USER FILE SHARES
+|--------------------------------------------------------------------------
+| GET /api/shares
+|--------------------------------------------------------------------------
+*/
 
 async function listShares(req, res, next) {
     try {
@@ -363,15 +628,14 @@ async function listShares(req, res, next) {
             });
         }
 
-        const result =
-            await getUserFileShares(
-                req.user.userId,
-                {
-                    page,
-                    limit,
-                    status
-                }
-            );
+        const result = await getUserFileShares(
+            req.user.userId,
+            {
+                page,
+                limit,
+                status
+            }
+        );
 
         return res.status(200).json({
             success: true,
@@ -380,30 +644,14 @@ async function listShares(req, res, next) {
 
     } catch (error) {
 
-        if (error.message === "INVALID_PAGE") {
-            return res.status(400).json({
-                success: false,
-                message:
-                    "Page must be a positive integer."
-            });
-        }
-
-        if (error.message === "INVALID_LIMIT") {
-            return res.status(400).json({
-                success: false,
-                message:
-                    "Limit must be between 1 and 100."
-            });
-        }
-
         if (
-            error.message ===
-            "INVALID_SHARE_STATUS"
+            error.message === "INVALID_PAGE" ||
+            error.message === "INVALID_LIMIT" ||
+            error.message === "INVALID_SHARE_STATUS"
         ) {
             return res.status(400).json({
                 success: false,
-                message:
-                    "Invalid share status."
+                message: error.message
             });
         }
 
@@ -412,8 +660,126 @@ async function listShares(req, res, next) {
 }
 
 
+/*
+|--------------------------------------------------------------------------
+| GET SHARE ACTIVITY
+|--------------------------------------------------------------------------
+| GET /api/shares/:shareId/activity
+|--------------------------------------------------------------------------
+*/
+
+async function getShareActivityController(req, res, next) {
+    try {
+        const userId = req.user.userId;
+        const shareId = Number(req.params.shareId);
+
+        const page =
+            req.query.page === undefined
+                ? 1
+                : Number(req.query.page);
+
+        const limit =
+            req.query.limit === undefined
+                ? 20
+                : Number(req.query.limit);
+
+        const eventType =
+            req.query.eventType === undefined ||
+            req.query.eventType === ""
+                ? null
+                : String(req.query.eventType)
+                    .trim()
+                    .toUpperCase();
+
+        if (
+            !Number.isSafeInteger(shareId) ||
+            shareId < 1
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "shareId must be a positive integer."
+            });
+        }
+
+        if (!Number.isInteger(page) || page < 1) {
+            return res.status(400).json({
+                success: false,
+                message: "Page must be a positive integer."
+            });
+        }
+
+        if (
+            !Number.isInteger(limit) ||
+            limit < 1 ||
+            limit > 100
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Limit must be between 1 and 100."
+            });
+        }
+
+        if (
+            eventType !== null &&
+            !["OPENED", "VIEWED", "DOWNLOADED"].includes(eventType)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Invalid eventType. Allowed values are OPENED, VIEWED, DOWNLOADED."
+            });
+        }
+
+        const result = await getShareActivity(
+            userId,
+            shareId,
+            {
+                page,
+                limit,
+                eventType
+            }
+        );
+
+        return res.status(200).json({
+            success: true,
+            data: result
+        });
+
+    } catch (error) {
+
+        if (error.message === "SHARE_NOT_FOUND") {
+            return res.status(404).json({
+                success: false,
+                message: "Share not found."
+            });
+        }
+
+        if (
+            error.message === "INVALID_SHARE_ID" ||
+            error.message === "INVALID_PAGE" ||
+            error.message === "INVALID_LIMIT" ||
+            error.message === "INVALID_ACTIVITY_TYPE"
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+
+        next(error);
+    }
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| EXPORTS
+|--------------------------------------------------------------------------
+*/
+
 module.exports = {
     createShare,
     revokeShare,
-    listShares
+    listShares,
+    getShareActivity: getShareActivityController
 };

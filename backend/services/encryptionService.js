@@ -1,370 +1,204 @@
+
 const crypto = require("crypto");
 
-
-// =====================================================
-// CONFIGURATION
-// =====================================================
-
 const ALGORITHM = "aes-256-gcm";
-
 const KEY_LENGTH = 32;
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 
-
-// =====================================================
-// VALIDATE KEY
-// =====================================================
-
 function validateKey(key) {
-
-    if (!Buffer.isBuffer(key)) {
-
-        throw new Error(
-            "Encryption key must be a Buffer."
-        );
-    }
-
-
-    if (key.length !== KEY_LENGTH) {
-
-        throw new Error(
-            "Encryption key must be exactly 32 bytes."
-        );
+    if (!Buffer.isBuffer(key) || key.length !== KEY_LENGTH) {
+        throw new Error("INVALID_ENCRYPTION_KEY");
     }
 }
-
-
-// =====================================================
-// VALIDATE MASTER KEY HEX
-// =====================================================
 
 function validateMasterKeyHex(keyHex) {
-
-    if (!keyHex) {
-
-        throw new Error(
-            "Master key is not configured."
-        );
-    }
-
-
-    if (!/^[0-9a-fA-F]{64}$/.test(keyHex)) {
-
-        throw new Error(
-            "Master key must be exactly 64 hexadecimal characters."
-        );
+    if (
+        typeof keyHex !== "string" ||
+        !/^[0-9a-fA-F]{64}$/.test(keyHex)
+    ) {
+        throw new Error("INVALID_MASTER_KEY_CONFIGURATION");
     }
 }
 
-
-// =====================================================
-// GET ACTIVE KEY VERSION
-// =====================================================
-
 function getActiveKeyVersion() {
+    const rawVersion = process.env.VAULT_ACTIVE_KEY_VERSION || "1";
 
-    const version =
-        Number(
-            process.env.VAULT_ACTIVE_KEY_VERSION || 1
-        );
-
-
-    if (!Number.isInteger(version) || version < 1) {
-
-        throw new Error(
-            "VAULT_ACTIVE_KEY_VERSION must be a positive integer."
-        );
+    if (!/^[1-9]\d*$/.test(rawVersion)) {
+        throw new Error("INVALID_ACTIVE_KEY_VERSION");
     }
 
+    const version = Number(rawVersion);
+
+    if (!Number.isSafeInteger(version)) {
+        throw new Error("INVALID_ACTIVE_KEY_VERSION");
+    }
 
     return version;
 }
 
-
-// =====================================================
-// GET MASTER KEY BY VERSION
-// =====================================================
-
 function getMasterKey(version = getActiveKeyVersion()) {
-
-    const keyVersion =
-        Number(version);
-
+    const keyVersion = Number(version);
 
     if (
-        !Number.isInteger(keyVersion) ||
+        !Number.isSafeInteger(keyVersion) ||
         keyVersion < 1
     ) {
-
-        throw new Error(
-            "Invalid master key version."
-        );
+        throw new Error("INVALID_MASTER_KEY_VERSION");
     }
 
+    const keyHex = process.env[`VAULT_MASTER_KEY_V${keyVersion}`];
 
-    const envName =
-        `VAULT_MASTER_KEY_V${keyVersion}`;
+    validateMasterKeyHex(keyHex);
 
+    const key = Buffer.from(keyHex, "hex");
 
-    const keyHex =
-        process.env[envName];
+    if (key.length !== KEY_LENGTH) {
+        key.fill(0);
+        throw new Error("INVALID_MASTER_KEY_CONFIGURATION");
+    }
 
-
-    validateMasterKeyHex(
-        keyHex
-    );
-
-
-    return Buffer.from(
-        keyHex,
-        "hex"
-    );
+    return key;
 }
-
-
-// =====================================================
-// GENERATE MASTER KEY
-// =====================================================
 
 function generateMasterKey() {
-
-    return crypto
-        .randomBytes(KEY_LENGTH)
-        .toString("hex");
+    return crypto.randomBytes(KEY_LENGTH).toString("hex");
 }
 
-
-// =====================================================
-// ENCRYPT DATA
-// =====================================================
-
-function encryptData(
-    plaintext,
-    key
-) {
-
+function encryptData(plaintext, key) {
     validateKey(key);
 
-
-    if (!Buffer.isBuffer(plaintext)) {
-
-        plaintext =
-            Buffer.from(plaintext);
+    if (
+        !Buffer.isBuffer(plaintext) &&
+        typeof plaintext !== "string"
+    ) {
+        throw new Error("INVALID_PLAINTEXT");
     }
 
+    const input = Buffer.isBuffer(plaintext)
+        ? plaintext
+        : Buffer.from(plaintext, "utf8");
 
-    const iv =
-        crypto.randomBytes(
-            IV_LENGTH
-        );
+    const iv = crypto.randomBytes(IV_LENGTH);
 
+    try {
+        const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
 
-    const cipher =
-        crypto.createCipheriv(
-            ALGORITHM,
-            key,
-            iv
-        );
-
-
-    const encrypted =
-        Buffer.concat([
-            cipher.update(plaintext),
+        const encrypted = Buffer.concat([
+            cipher.update(input),
             cipher.final()
         ]);
 
+        const authTag = cipher.getAuthTag();
 
-    const authTag =
-        cipher.getAuthTag();
+        if (authTag.length !== AUTH_TAG_LENGTH) {
+            throw new Error("INVALID_AUTH_TAG");
+        }
 
-
-    if (
-        authTag.length !==
-        AUTH_TAG_LENGTH
-    ) {
-
-        throw new Error(
-            "Invalid authentication tag length."
-        );
+        return {
+            encrypted,
+            iv: iv.toString("base64"),
+            authTag: authTag.toString("base64")
+        };
+    } finally {
+        iv.fill(0);
     }
-
-
-    return {
-
-        encrypted,
-
-        iv:
-            iv.toString("base64"),
-
-        authTag:
-            authTag.toString("base64")
-
-    };
 }
 
+function decodeBase64(value, expectedLength, label) {
+    if (typeof value !== "string" || value.length === 0) {
+        throw new Error(`INVALID_${label}`);
+    }
 
-// =====================================================
-// DECRYPT DATA
-// =====================================================
+    const buffer = Buffer.from(value, "base64");
 
-function decryptData(
-    encrypted,
-    key,
-    iv,
-    authTag
-) {
+    if (
+        buffer.length !== expectedLength ||
+        buffer.toString("base64") !== value
+    ) {
+        buffer.fill(0);
+        throw new Error(`INVALID_${label}`);
+    }
 
+    return buffer;
+}
+
+function decryptData(encrypted, key, iv, authTag) {
     validateKey(key);
 
-
-    if (!Buffer.isBuffer(encrypted)) {
-
-        encrypted =
-            Buffer.from(encrypted);
+    if (
+        !Buffer.isBuffer(encrypted) &&
+        typeof encrypted !== "string"
+    ) {
+        throw new Error("INVALID_ENCRYPTED_DATA");
     }
 
+    // Strings passed to this function are Base64-encoded ciphertext.
+    const encryptedBuffer = Buffer.isBuffer(encrypted)
+        ? encrypted
+        : Buffer.from(encrypted, "base64");
 
-    const ivBuffer =
-        Buffer.from(
-            iv,
-            "base64"
-        );
+    const ivBuffer = decodeBase64(iv, IV_LENGTH, "IV");
+    let authTagBuffer;
 
-
-    const authTagBuffer =
-        Buffer.from(
+    try {
+        authTagBuffer = decodeBase64(
             authTag,
-            "base64"
+            AUTH_TAG_LENGTH,
+            "AUTH_TAG"
         );
 
-
-    if (
-        ivBuffer.length !==
-        IV_LENGTH
-    ) {
-
-        throw new Error(
-            "Invalid IV length."
-        );
-    }
-
-
-    if (
-        authTagBuffer.length !==
-        AUTH_TAG_LENGTH
-    ) {
-
-        throw new Error(
-            "Invalid authentication tag length."
-        );
-    }
-
-
-    const decipher =
-        crypto.createDecipheriv(
+        const decipher = crypto.createDecipheriv(
             ALGORITHM,
             key,
             ivBuffer
         );
 
+        decipher.setAuthTag(authTagBuffer);
 
-    decipher.setAuthTag(
-        authTagBuffer
-    );
+        return Buffer.concat([
+            decipher.update(encryptedBuffer),
+            decipher.final()
+        ]);
+    } finally {
+        ivBuffer.fill(0);
 
-
-    return Buffer.concat([
-        decipher.update(encrypted),
-        decipher.final()
-    ]);
+        if (authTagBuffer) {
+            authTagBuffer.fill(0);
+        }
+    }
 }
 
-
-// =====================================================
-// ENCRYPT FILE KEY
-// =====================================================
-
-function encryptFileKey(
-    fileKey,
-    version = getActiveKeyVersion()
-) {
-
+function encryptFileKey(fileKey, version = getActiveKeyVersion()) {
     validateKey(fileKey);
 
+    const keyVersion = Number(version);
+    const masterKey = getMasterKey(keyVersion);
 
-    const masterKey =
-        getMasterKey(
-            version
-        );
-
-
-    const encrypted =
-        encryptData(
-            fileKey,
-            masterKey
-        );
-
-
-    return {
-
-        ...encrypted,
-
-        keyVersion:
-            Number(version)
-
-    };
+    try {
+        return {
+            ...encryptData(fileKey, masterKey),
+            keyVersion
+        };
+    } finally {
+        masterKey.fill(0);
+    }
 }
 
+function decryptFileKey(encryptedKey, iv, authTag, version) {
+    const masterKey = getMasterKey(version);
 
-// =====================================================
-// DECRYPT FILE KEY
-// =====================================================
-
-function decryptFileKey(
-    encryptedKey,
-    iv,
-    authTag,
-    version
-) {
-
-    const masterKey =
-        getMasterKey(
-            version
+    try {
+        return decryptData(
+            encryptedKey,
+            masterKey,
+            iv,
+            authTag
         );
-
-
-    return decryptData(
-        encryptedKey,
-        masterKey,
-        iv,
-        authTag
-    );
+    } finally {
+        masterKey.fill(0);
+    }
 }
-
-
-// =====================================================
-// RE-WRAP FILE KEY
-// =====================================================
-//
-// This is the important rotation operation.
-//
-// File contents are NOT decrypted.
-// File contents are NOT re-encrypted.
-//
-// Only the DEK is:
-//
-// Old Master Key
-//       ↓
-// decrypt DEK
-//       ↓
-// File DEK
-//       ↓
-// encrypt DEK
-//       ↓
-// New Master Key
-//
-// =====================================================
 
 function rewrapFileKey(
     encryptedKey,
@@ -373,66 +207,32 @@ function rewrapFileKey(
     oldVersion,
     newVersion
 ) {
+    const fileKey = decryptFileKey(
+        encryptedKey,
+        iv,
+        authTag,
+        oldVersion
+    );
 
-    const fileKey =
-        decryptFileKey(
-            encryptedKey,
-            iv,
-            authTag,
-            oldVersion
-        );
-
-
-    const result =
-        encryptFileKey(
-            fileKey,
-            newVersion
-        );
-
-
-    // Clear the plaintext DEK
-    // from this Buffer after re-wrapping.
-    fileKey.fill(0);
-
-
-    return result;
+    try {
+        return encryptFileKey(fileKey, newVersion);
+    } finally {
+        fileKey.fill(0);
+    }
 }
-
-
-// =====================================================
-// GENERATE FILE KEY
-// =====================================================
 
 function generateFileKey() {
-
-    return crypto.randomBytes(
-        KEY_LENGTH
-    );
+    return crypto.randomBytes(KEY_LENGTH);
 }
 
-
-// =====================================================
-// EXPORTS
-// =====================================================
-
 module.exports = {
-
     encryptData,
-
     decryptData,
-
     encryptFileKey,
-
     decryptFileKey,
-
     rewrapFileKey,
-
     generateFileKey,
-
     getMasterKey,
-
     getActiveKeyVersion,
-
     generateMasterKey
-
 };

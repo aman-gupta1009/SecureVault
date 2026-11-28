@@ -125,226 +125,168 @@ async function register(req, res, next) {
 // VERIFY REGISTRATION OTP
 // =====================================================
 
-async function verifyRegistrationOTP(
-    req,
-    res,
-    next
-) {
+
+async function verifyRegistrationOTP(req, res, next) {
+    let connection;
+    let transactionStarted = false;
 
     try {
-
-        const {
-            email,
-            otp
-        } = req.body;
-
+        const { email, otp } = req.body || {};
 
         if (
             typeof email !== "string" ||
             typeof otp !== "string"
         ) {
-
             return res.status(400).json({
-
                 success: false,
-
-                message:
-                    "Email and OTP are required."
-
+                message: "Email and OTP are required."
             });
         }
 
-
-        const normalizedEmail =
-            email.trim().toLowerCase();
-
-        const normalizedOTP =
-            otp.trim();
-
+        const normalizedEmail = email.trim().toLowerCase();
+        const normalizedOTP = otp.trim();
 
         if (!/^\d{6}$/.test(normalizedOTP)) {
-
             return res.status(400).json({
-
                 success: false,
-
-                message:
-                    "OTP must be a 6-digit number."
-
+                message: "OTP must be a 6-digit number."
             });
         }
 
+        connection = await pool.getConnection();
+        await connection.beginTransaction();
+        transactionStarted = true;
 
-        const [
-            users
-        ] = await pool.execute(
-
+        // Lock the account while verifying its registration OTP.
+        const [users] = await connection.execute(
             `
-            SELECT
-                user_id,
-                email,
-                email_verified
+            SELECT user_id, email, email_verified
             FROM users
             WHERE email = ?
             LIMIT 1
+            FOR UPDATE
             `,
-
-            [
-                normalizedEmail
-            ]
-
+            [normalizedEmail]
         );
 
-
         if (users.length === 0) {
+            await connection.rollback();
+            transactionStarted = false;
 
             return res.status(404).json({
-
                 success: false,
-
-                message:
-                    "Account not found."
-
+                message: "Account not found."
             });
         }
 
+        const user = users[0];
 
-        const user =
-            users[0];
-
-
-        if (user.email_verified === 1) {
+        if (
+            user.email_verified === true ||
+            Number(user.email_verified) === 1
+        ) {
+            await connection.rollback();
+            transactionStarted = false;
 
             return res.status(400).json({
-
                 success: false,
-
-                message:
-                    "Email is already verified."
-
+                message: "Email is already verified."
             });
         }
 
-
-        const verification =
-            await verifyOTP(
-                user.user_id,
-                "REGISTRATION",
-                normalizedOTP
-            );
-
+        // Use the same transaction for OTP verification and consumption.
+        const verification = await verifyOTP(
+            user.user_id,
+            "REGISTRATION",
+            normalizedOTP,
+            {
+                consume: true,
+                connection
+            }
+        );
 
         if (!verification.success) {
+            // Commit failed-attempt counters and expired-OTP invalidation.
+            await connection.commit();
+            transactionStarted = false;
 
-            switch (
-                verification.reason
-            ) {
-
+            switch (verification.reason) {
                 case "OTP_NOT_FOUND":
-
                     return res.status(400).json({
-
                         success: false,
-
                         message:
                             "No active OTP found. Please request a new OTP."
-
                     });
-
 
                 case "OTP_EXPIRED":
-
                     return res.status(400).json({
-
                         success: false,
-
                         message:
                             "OTP has expired. Please request a new OTP."
-
                     });
-
 
                 case "OTP_ATTEMPTS_EXCEEDED":
-
                     return res.status(429).json({
-
                         success: false,
-
                         message:
                             "Too many incorrect OTP attempts. Please request a new OTP."
-
                     });
-
 
                 case "INVALID_OTP":
-
                     return res.status(400).json({
-
                         success: false,
-
-                        message:
-                            "Invalid OTP."
-
+                        message: "Invalid OTP."
                     });
 
-
                 default:
-
                     return res.status(400).json({
-
                         success: false,
-
-                        message:
-                            "OTP verification failed."
-
+                        message: "OTP verification failed."
                     });
             }
         }
 
-
-        await pool.execute(
-
+        await connection.execute(
             `
             UPDATE users
             SET email_verified = TRUE
             WHERE user_id = ?
             `,
-
-            [
-                user.user_id
-            ]
-
+            [user.user_id]
         );
 
+        await connection.commit();
+        transactionStarted = false;
 
         return res.status(200).json({
-
             success: true,
-
-            message:
-                "Email verified successfully.",
-
+            message: "Email verified successfully.",
             data: {
-
-                userId:
-                    user.user_id,
-
-                email:
-                    user.email,
-
-                emailVerified:
-                    true
-
+                userId: user.user_id,
+                email: user.email,
+                emailVerified: true
             }
-
         });
-
     } catch (error) {
+        if (connection && transactionStarted) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error(
+                    "Registration OTP rollback failed:",
+                    rollbackError.message
+                );
+            }
+        }
 
         next(error);
-
+    } finally {
+        if (connection) {
+            connection.release();
+        }
     }
 }
+
 
 
 // =====================================================
@@ -421,7 +363,10 @@ async function resendRegistrationOTP(
             users[0];
 
 
-        if (user.email_verified === 1) {
+        if (
+    user.email_verified === true ||
+    Number(user.email_verified) === 1
+) {
 
             return res.status(400).json({
 
@@ -610,19 +555,48 @@ async function login(
         // USER NOT FOUND
         // -------------------------------------------------
 
-        if (
-            users.length === 0
-        ) {
 
-            return res.status(401).json({
+// -------------------------------------------------
+// USER NOT FOUND
+// Perform dummy Argon2 verification to reduce
+// account-enumeration timing differences.
+// -------------------------------------------------
 
-                success: false,
+if (users.length === 0) {
+    const argon2 = require("argon2");
 
-                message:
-                    "Invalid email or password."
-
-            });
+    try {
+        // Generate a dummy Argon2id hash once and reuse it.
+        // The promise is cached so concurrent requests share
+        // the same initialization.
+        if (!login.dummyPasswordHashPromise) {
+            login.dummyPasswordHashPromise = argon2.hash(
+                require("crypto").randomBytes(32).toString("hex"),
+                {
+                    type: argon2.argon2id
+                }
+            );
         }
+
+        const dummyPasswordHash =
+            await login.dummyPasswordHashPromise;
+
+        // Perform verification even when the email is unknown.
+        await argon2.verify(
+            dummyPasswordHash,
+            password
+        );
+    } catch (error) {
+        // Do not reveal internal hashing errors to the client.
+        return next(error);
+    }
+
+    return res.status(401).json({
+        success: false,
+        message: "Invalid email or password."
+    });
+}
+
 
 
         const user =
@@ -758,226 +732,138 @@ async function login(
         // INVALID PASSWORD
         // -------------------------------------------------
 
-        if (!passwordValid) {
+      if (!passwordValid) {
+    const maxAttempts = Number(
+        process.env.MAX_LOGIN_ATTEMPTS || 5
+    );
 
-            const maxAttempts =
-                Number(
-                    process.env.MAX_LOGIN_ATTEMPTS || 5
-                );
+    const lockMinutes = Number(
+        process.env.LOGIN_LOCK_MINUTES || 15
+    );
 
+    // Atomically increment failed attempts.
+    // Lock the account when the threshold is reached.
+    const [updateResult] = await pool.execute(
+        `
+        UPDATE users
+        SET
+            locked_until = CASE
+                WHEN failed_login_attempts >= ? - 1
+                THEN DATE_ADD(NOW(), INTERVAL ? MINUTE)
+                ELSE locked_until
+            END,
+            account_status = CASE
+                WHEN failed_login_attempts >= ? - 1
+                THEN 'LOCKED'
+                ELSE account_status
+            END,
+            failed_login_attempts = failed_login_attempts + 1
+        WHERE user_id = ?
+          AND (
+              locked_until IS NULL
+              OR locked_until <= NOW()
+          )
+        `,
+        [
+            maxAttempts,
+            lockMinutes,
+            maxAttempts,
+            user.user_id
+        ]
+    );
 
-            const lockMinutes =
-                Number(
-                    process.env.LOGIN_LOCK_MINUTES || 15
-                );
+    // Read the latest database state after the update.
+    const [updatedUsers] = await pool.execute(
+        `
+        SELECT
+            failed_login_attempts,
+            locked_until
+        FROM users
+        WHERE user_id = ?
+        LIMIT 1
+        `,
+        [user.user_id]
+    );
 
+    if (updatedUsers.length === 0) {
+        throw new Error(
+            "Unable to retrieve updated login security state."
+        );
+    }
 
-            const currentAttempts =
-                Number(
-                    user.failed_login_attempts || 0
-                );
+    const updatedUser = updatedUsers[0];
 
+    const newAttempts = Number(
+        updatedUser.failed_login_attempts
+    );
 
-            const newAttempts =
-                currentAttempts + 1;
+    const isLocked =
+        updatedUser.locked_until &&
+        new Date(updatedUser.locked_until).getTime() >
+            Date.now();
 
+    // Log the failed login.
+    await logSecurityEvent({
+        userId: user.user_id,
+        eventType: "LOGIN_FAILED",
+        req,
+        metadata: {
+            reason: "INVALID_PASSWORD",
+            failedAttempts: newAttempts,
+            remainingAttempts: Math.max(
+                0,
+                maxAttempts - newAttempts
+            )
+        }
+    });
 
-            // ---------------------------------------------
-            // MAXIMUM ATTEMPTS REACHED
-            // ---------------------------------------------
+    // If this request or a concurrent request locked the account.
+    if (isLocked || updateResult.affectedRows === 0) {
+        let remainingMinutes = lockMinutes;
 
-            if (
-                newAttempts >=
-                maxAttempts
-            ) {
-
-                // -----------------------------------------
-                // LOCK ACCOUNT
-                // -----------------------------------------
-
-                await pool.execute(
-
-                    `
-                    UPDATE users
-
-                    SET
-                        failed_login_attempts = ?,
-
-                        locked_until =
-                            DATE_ADD(
-                                NOW(),
-                                INTERVAL ? MINUTE
-                            ),
-
-                        account_status = 'LOCKED'
-
-                    WHERE user_id = ?
-                    `,
-
-                    [
-                        newAttempts,
-                        lockMinutes,
-                        user.user_id
-                    ]
-
-                );
-
-
-                // -----------------------------------------
-                // LOG FAILED LOGIN
-                // -----------------------------------------
-
-                await logSecurityEvent({
-
-                    userId:
-                        user.user_id,
-
-                    eventType:
-                        "LOGIN_FAILED",
-
-                    req,
-
-                    metadata: {
-
-                        reason:
-                            "INVALID_PASSWORD",
-
-                        failedAttempts:
-                            newAttempts,
-
-                        remainingAttempts:
-                            0
-
-                    }
-
-                });
-
-
-                // -----------------------------------------
-                // LOG ACCOUNT LOCKED
-                // -----------------------------------------
-
-                await logSecurityEvent({
-
-                    userId:
-                        user.user_id,
-
-                    eventType:
-                        "ACCOUNT_LOCKED",
-
-                    req,
-
-                    metadata: {
-
-                        reason:
-                            "MAX_LOGIN_ATTEMPTS_EXCEEDED",
-
-                        failedAttempts:
-                            newAttempts,
-
-                        lockMinutes:
-                            lockMinutes
-
-                    }
-
-                });
-
-
-                // -----------------------------------------
-                // RETURN LOCK RESPONSE
-                // -----------------------------------------
-
-                return res.status(429).json({
-
-                    success:
-                        false,
-
-                    message:
-                        `Too many failed login attempts. Account locked for ${lockMinutes} minutes.`,
-
-                    retryAfter:
-                        lockMinutes
-
-                });
-            }
-
-
-            // ---------------------------------------------
-            // INCREMENT FAILED ATTEMPTS
-            // ---------------------------------------------
-
-            await pool.execute(
-
-                `
-                UPDATE users
-
-                SET
-                    failed_login_attempts = ?
-
-                WHERE user_id = ?
-                `,
-
-                [
-                    newAttempts,
-                    user.user_id
-                ]
-
+        if (isLocked) {
+            remainingMinutes = Math.max(
+                1,
+                Math.ceil(
+                    (
+                        new Date(updatedUser.locked_until).getTime() -
+                        Date.now()
+                    ) / 60000
+                )
             );
-
-
-            // ---------------------------------------------
-            // LOG FAILED LOGIN
-            // ---------------------------------------------
-
-            await logSecurityEvent({
-
-                userId:
-                    user.user_id,
-
-                eventType:
-                    "LOGIN_FAILED",
-
-                req,
-
-                metadata: {
-
-                    reason:
-                        "INVALID_PASSWORD",
-
-                    failedAttempts:
-                        newAttempts,
-
-                    remainingAttempts:
-                        maxAttempts -
-                        newAttempts
-
-                }
-
-            });
-
-
-            const remainingAttempts =
-                maxAttempts -
-                newAttempts;
-
-
-            // ---------------------------------------------
-            // RETURN INVALID PASSWORD
-            // ---------------------------------------------
-
-            return res.status(401).json({
-
-                success:
-                    false,
-
-                message:
-                    "Invalid email or password.",
-
-                remainingAttempts
-
-            });
         }
 
+        await logSecurityEvent({
+            userId: user.user_id,
+            eventType: "ACCOUNT_LOCKED",
+            req,
+            metadata: {
+                reason: "MAX_LOGIN_ATTEMPTS_EXCEEDED",
+                failedAttempts: newAttempts,
+                lockMinutes: remainingMinutes
+            }
+        });
+
+        return res.status(429).json({
+            success: false,
+            message:
+                `Too many failed login attempts. Account locked for ${remainingMinutes} minutes.`,
+            retryAfter: remainingMinutes
+        });
+    }
+
+    // Account is not locked yet.
+    const remainingAttempts = Math.max(
+        0,
+        maxAttempts - newAttempts
+    );
+
+    return res.status(401).json({
+        success: false,
+        message: "Invalid email or password.",
+        remainingAttempts
+    });
+}
 
         // -------------------------------------------------
         // SUCCESSFUL LOGIN

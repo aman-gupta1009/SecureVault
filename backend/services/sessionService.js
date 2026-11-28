@@ -327,35 +327,23 @@ async function revokeSession(
 // REVOKE ALL USER SESSIONS
 // =====================================================
 
-async function revokeAllUserSessions(
-    userId
-) {
 
-    const [
-        result
-    ] = await pool.execute(
-        `
-        UPDATE sessions
+async function revokeAllUserSessions(userId, connection = pool) {
+    if (!Number.isInteger(Number(userId)) || Number(userId) <= 0) {
+        throw new Error("Invalid user ID.");
+    }
 
-        SET
-            revoked = TRUE
-
-        WHERE
-            user_id = ?
-
-        AND
-            revoked = FALSE
-        `,
-        [
-            userId
-        ]
+    const [result] = await connection.execute(
+        `UPDATE sessions
+         SET revoked = TRUE
+         WHERE user_id = ?
+           AND revoked = FALSE`,
+        [Number(userId)]
     );
 
-
-    return (
-        result.affectedRows
-    );
+    return result.affectedRows;
 }
+
 
 
 // =====================================================
@@ -443,6 +431,98 @@ function startSessionCleanupJob() {
     );
 }
 
+async function getUserSessions(userId, currentSessionId) {
+    const safeUserId = Number(userId);
+
+    if (!Number.isSafeInteger(safeUserId) || safeUserId <= 0) {
+        throw new Error("Invalid user ID.");
+    }
+
+    const [rows] = await pool.execute(
+        `SELECT
+            session_id,
+            device_name,
+            ip_address,
+            user_agent,
+            expires_at,
+            created_at,
+            last_activity_at
+         FROM sessions
+         WHERE user_id = ?
+           AND revoked = FALSE
+           AND expires_at > NOW()
+         ORDER BY last_activity_at DESC`,
+        [safeUserId]
+    );
+
+    return rows.map((session) => ({
+        sessionId: session.session_id,
+        deviceName: session.device_name || "Unknown device",
+        ipAddress: session.ip_address || "Unavailable",
+        userAgent: session.user_agent || "",
+        expiresAt: session.expires_at,
+        createdAt: session.created_at,
+        lastActivityAt: session.last_activity_at,
+        isCurrent: Number(session.session_id) === Number(currentSessionId)
+    }));
+}
+
+async function revokeUserSession(userId, sessionId, currentSessionId) {
+    const safeUserId = Number(userId);
+    const safeSessionId = Number(sessionId);
+    const safeCurrentSessionId = Number(currentSessionId);
+
+    if (
+        !Number.isSafeInteger(safeUserId) || safeUserId <= 0 ||
+        !Number.isSafeInteger(safeSessionId) || safeSessionId <= 0
+    ) {
+        throw new Error("Invalid session information.");
+    }
+
+    // Prevent accidentally revoking the session making this request.
+    if (safeSessionId === safeCurrentSessionId) {
+        return { revoked: false, reason: "CURRENT_SESSION" };
+    }
+
+    const [result] = await pool.execute(
+        `UPDATE sessions
+         SET revoked = TRUE
+         WHERE session_id = ?
+           AND user_id = ?
+           AND revoked = FALSE
+           AND expires_at > NOW()`,
+        [safeSessionId, safeUserId]
+    );
+
+    return {
+        revoked: result.affectedRows > 0,
+        reason: result.affectedRows > 0 ? null : "NOT_FOUND"
+    };
+}
+
+async function revokeOtherUserSessions(userId, currentSessionId) {
+    const safeUserId = Number(userId);
+    const safeCurrentSessionId = Number(currentSessionId);
+
+    if (
+        !Number.isSafeInteger(safeUserId) || safeUserId <= 0 ||
+        !Number.isSafeInteger(safeCurrentSessionId) || safeCurrentSessionId <= 0
+    ) {
+        throw new Error("Invalid session information.");
+    }
+
+    const [result] = await pool.execute(
+        `UPDATE sessions
+         SET revoked = TRUE
+         WHERE user_id = ?
+           AND session_id <> ?
+           AND revoked = FALSE`,
+        [safeUserId, safeCurrentSessionId]
+    );
+
+    return result.affectedRows;
+}
+
 
 // =====================================================
 // EXPORTS
@@ -460,7 +540,13 @@ module.exports = {
 
     cleanupExpiredSessions,
 
-    startSessionCleanupJob
+    startSessionCleanupJob,
+
+    getUserSessions,
+
+    revokeUserSession,
+
+    revokeOtherUserSessions
 
 };
 

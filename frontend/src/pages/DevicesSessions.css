@@ -1,0 +1,561 @@
+
+/* =========================================
+   SECUREVAULT - DEVICES & SESSIONS
+   Compatible with all 6 global themes
+========================================= */
+
+.dss-page {
+  width: 100%;
+  max-width: 1250px;
+  margin: 0 auto;
+  padding: 8px 2px 28px;
+  color: var(--sv-text);
+}
+
+/* Heading */
+
+.dss-heading,
+.dss-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.dss-heading {
+  margin-bottom: 26px;
+}
+
+.dss-eyebrow {
+  display: block;
+  margin-bottom: 9px;
+  color: var(--sv-accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.6px;
+}
+
+.dss-heading h1 {
+  margin: 0;
+  color: var(--sv-text);
+  font-size: clamp(25px, 3vw, 34px);
+  font-weight: 750;
+  letter-spacing: -1.1px;
+}
+
+.dss-heading p,
+.dss-section-heading p {
+  margin: 9px 0 0;
+  color: var(--sv-text-muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+/* Common buttons */
+
+.dss-refresh-button,
+.dss-revoke-all,
+.dss-secondary-button {
+  min-height: 40px;
+  padding: 0 15px;
+  border: 1px solid var(--sv-border);
+  border-radius: 10px;
+  background: var(--sv-surface);
+  color: var(--sv-text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.dss-refresh-button:hover,
+.dss-secondary-button:hover {
+  border-color: var(--sv-accent);
+  background: var(--sv-surface-raised);
+}
+
+.dss-refresh-button span {
+  display: inline-block;
+  margin-right: 7px;
+  font-size: 17px;
+  vertical-align: -1px;
+}
+
+.dss-refresh-spin {
+  animation: dss-spin 0.8s linear infinite;
+}
+
+@keyframes dss-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.dss-refresh-button:disabled,
+.dss-revoke-all:disabled,
+.dss-revoke-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Summary cards */
+
+.dss-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 34px;
+}
+
+.dss-summary-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 105px;
+  padding: 18px;
+  border: 1px solid var(--sv-border);
+  border-radius: 15px;
+  background: var(--sv-surface);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.dss-summary-icon {
+  display: grid;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--sv-accent) 25%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--sv-accent) 10%, transparent);
+  color: var(--sv-accent);
+  font-size: 21px;
+}
+
+.dss-summary-card div:last-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dss-summary-card span {
+  color: var(--sv-text-muted);
+  font-size: 11px;
+}
+
+.dss-summary-card strong {
+  color: var(--sv-text);
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.dss-summary-card small {
+  color: var(--sv-text-muted);
+  font-size: 10px;
+}
+
+/* Section heading */
+
+.dss-section-heading {
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.dss-section-heading h2 {
+  margin: 0;
+  color: var(--sv-text);
+  font-size: 19px;
+  font-weight: 750;
+}
+
+.dss-section-heading p {
+  max-width: 620px;
+  font-size: 12px;
+}
+
+/* Danger buttons */
+
+.dss-revoke-all,
+.dss-revoke-button {
+  border-color: color-mix(in srgb, var(--sv-danger) 40%, transparent);
+  background: color-mix(in srgb, var(--sv-danger) 8%, transparent);
+  color: var(--sv-danger);
+}
+
+.dss-revoke-all {
+  flex-shrink: 0;
+}
+
+.dss-revoke-all:hover:not(:disabled),
+.dss-revoke-button:hover:not(:disabled) {
+  border-color: var(--sv-danger);
+  background: color-mix(in srgb, var(--sv-danger) 16%, transparent);
+}
+
+/* Session list */
+
+.dss-session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dss-session-card {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 17px;
+  padding: 20px;
+  border: 1px solid var(--sv-border);
+  border-radius: 15px;
+  background: var(--sv-surface);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.dss-session-card:hover {
+  border-color: var(--sv-accent);
+}
+
+.dss-current-session {
+  border-color: color-mix(in srgb, var(--sv-accent) 45%, var(--sv-border));
+  background: var(--sv-surface);
+}
+
+/* Device icon */
+
+.dss-device-icon {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  place-items: center;
+  border: 1px solid var(--sv-border);
+  border-radius: 13px;
+  background: var(--sv-surface-raised);
+  color: var(--sv-accent);
+}
+
+.dss-device-icon svg {
+  width: 25px;
+  height: 25px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Session information */
+
+.dss-session-main {
+  min-width: 0;
+}
+
+.dss-session-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dss-session-title-row h3 {
+  margin: 0;
+  color: var(--sv-text);
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.dss-current-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--sv-accent) 35%, transparent);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--sv-accent) 10%, transparent);
+  color: var(--sv-accent);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.dss-current-badge i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sv-accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--sv-accent) 55%, transparent);
+}
+
+.dss-device-subtitle {
+  margin: 6px 0 15px;
+  color: var(--sv-text-muted);
+  font-size: 11px;
+}
+
+.dss-session-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 22px;
+}
+
+.dss-session-meta span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.dss-session-meta small {
+  color: var(--sv-text-muted);
+  font-size: 10px;
+}
+
+.dss-session-meta strong {
+  overflow-wrap: anywhere;
+  color: var(--sv-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Session actions */
+
+.dss-session-action {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 90px;
+}
+
+.dss-protected-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--sv-success-bg);
+  color: var(--sv-success-text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.dss-revoke-button {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+/* Loading and empty states */
+
+.dss-state-card {
+  display: flex;
+  min-height: 230px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  border: 1px dashed var(--sv-border);
+  border-radius: 15px;
+  background: var(--sv-surface);
+  color: var(--sv-text);
+  text-align: center;
+}
+
+.dss-state-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 13px;
+  place-items: center;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--sv-accent) 10%, transparent);
+  color: var(--sv-accent);
+  font-size: 23px;
+}
+
+.dss-state-card strong {
+  color: var(--sv-text);
+  font-size: 14px;
+}
+
+.dss-state-card p {
+  max-width: 380px;
+  margin: 8px 0 16px;
+  color: var(--sv-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.dss-loader {
+  width: 28px;
+  height: 28px;
+  margin-bottom: 14px;
+  border: 3px solid var(--sv-border);
+  border-top-color: var(--sv-accent);
+  border-radius: 50%;
+  animation: dss-spin 0.8s linear infinite;
+}
+
+/* Security information */
+
+.dss-security-note {
+  display: flex;
+  gap: 13px;
+  margin-top: 22px;
+  padding: 17px;
+  border: 1px solid color-mix(in srgb, var(--sv-accent) 25%, transparent);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--sv-accent) 6%, var(--sv-surface));
+}
+
+.dss-security-note-icon {
+  display: grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--sv-accent) 13%, transparent);
+  color: var(--sv-accent);
+  font-size: 17px;
+}
+
+.dss-security-note strong {
+  color: var(--sv-text);
+  font-size: 12px;
+}
+
+.dss-security-note p {
+  margin: 5px 0 0;
+  color: var(--sv-text-muted);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+/* Error and success messages */
+
+.dss-message {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.dss-message > span {
+  display: grid;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 50%;
+  font-weight: 800;
+}
+
+.dss-error {
+  border-color: color-mix(in srgb, var(--sv-danger) 35%, transparent);
+  background: color-mix(in srgb, var(--sv-danger) 9%, transparent);
+  color: var(--sv-danger);
+}
+
+.dss-success {
+  border-color: color-mix(in srgb, var(--sv-success-text) 35%, transparent);
+  background: var(--sv-success-bg);
+  color: var(--sv-success-text);
+}
+
+/* Footer */
+
+.dss-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 23px;
+  color: var(--sv-text-muted);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 1px;
+}
+
+/* Focus accessibility */
+
+.dss-page button:focus-visible {
+  outline: 2px solid var(--sv-accent);
+  outline-offset: 3px;
+}
+
+/* Message animation */
+
+.dss-message {
+  animation: dss-message-enter 180ms ease-out;
+}
+
+@keyframes dss-message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Responsive layout */
+
+@media (max-width: 850px) {
+  .dss-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dss-session-card {
+    grid-template-columns: 45px minmax(0, 1fr);
+  }
+
+  .dss-session-action {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+
+  .dss-device-icon {
+    width: 43px;
+    height: 43px;
+  }
+}
+
+@media (max-width: 600px) {
+  .dss-heading,
+  .dss-section-heading {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dss-refresh-button,
+  .dss-revoke-all {
+    width: 100%;
+  }
+
+  .dss-session-card {
+    padding: 15px;
+    gap: 12px;
+  }
+
+  .dss-session-meta {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .dss-footer {
+    flex-direction: column;
+  }
+}

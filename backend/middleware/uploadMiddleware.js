@@ -1,36 +1,43 @@
+
 const multer = require("multer");
 
-
-// =====================================================
-// MEMORY STORAGE
-// =====================================================
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB per file
+const MAX_FILES = 10;
+const MAX_TOTAL_FILE_SIZE = 100 * 1024 * 1024; // 100 MB per request
 
 const storage = multer.memoryStorage();
 
-
-// =====================================================
-// UPLOAD CONFIGURATION
-// =====================================================
-
 const upload = multer({
-
     storage,
 
     limits: {
-
-        // Maximum size of each file: 50 MB
-        fileSize: 50 * 1024 * 1024,
-
-        // Maximum number of files in one request
-        files: 10
-
+        fileSize: MAX_FILE_SIZE,
+        files: MAX_FILES,
+        fields: 20,
+        parts: MAX_FILES + 20,
+        fieldSize: 16 * 1024
     }
-
 });
 
+function validateUploadBatch(req, res, next) {
+    const files = req.files || [];
 
-// =====================================================
-// EXPORT
-// =====================================================
+    const totalSize = files.reduce(
+        (total, file) => total + file.size,
+        0
+    );
 
-module.exports = upload;
+    if (totalSize > MAX_TOTAL_FILE_SIZE) {
+        return res.status(413).json({
+            success: false,
+            message: "Total upload size must not exceed 100 MB per request."
+        });
+    }
+
+    next();
+}
+
+module.exports = {
+    upload,
+    validateUploadBatch
+};

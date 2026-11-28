@@ -28,3 +28,39 @@ Thumbs.db
 
 # SecureVault private files and backups
 backend/storage/
+
+
+# Local project archive - never commit
+/backend.zip
+
+# Windows Explorer shortcut
+/Recycle Bin - Shortcut.lnk
+# Dependencies
+node_modules/
+**/node_modules/
+
+
+# Local password manager backups
+/password-manager-backup/
+
+# Local frontend backup copies
+**/*.backup.*
+**/*-backup.*
+**/*.jsx.backup
+
+# Local ZIP archives
+/*.zip
+
+# Local audit report
+/SecureVault_PM_Audit.txt
+
+# Old service backup copy
+/backend/services/fileShareService.before-permissions.js
+
+# Generated build output
+**/dist/
+**/build/
+**/coverage/
+
+# Vercel local configuration
+.vercel/

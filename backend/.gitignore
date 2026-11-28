@@ -20,3 +20,24 @@ storage/encrypted/*
 # Local development files
 .DS_Store
 Thumbs.db
+
+
+# Local audit reports
+audit-report*.json
+
+# Local backup copies
+*.bak
+*.pre-restore-fix.bak
+
+# Local-only SMTP diagnostics
+test-smtp.js
+
+# Local audit and review files
+cleanup-review
+
+
+# Local audit and review files
+cleanup-review
+
+# Empty local database placeholder
+/database/session.sql

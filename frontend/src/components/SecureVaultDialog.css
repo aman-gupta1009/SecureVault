@@ -1,0 +1,271 @@
+
+.sv-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(3, 8, 6, 0.76);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  animation: sv-dialog-fade-in 160ms ease-out;
+}
+
+.sv-dialog {
+  width: min(100%, 440px);
+  overflow: hidden;
+  border: 1px solid rgba(112, 205, 153, 0.25);
+  border-radius: 19px;
+  background: #111a15;
+  color: #edf5ef;
+  box-shadow:
+    0 28px 90px rgba(0, 0, 0, 0.58),
+    0 0 0 1px rgba(255, 255, 255, 0.025);
+  animation: sv-dialog-enter 200ms ease-out;
+}
+
+.sv-dialog-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 23px 0;
+}
+
+.sv-dialog-icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+}
+
+.sv-dialog-icon.danger {
+  border-color: rgba(239, 103, 103, 0.24);
+  background: rgba(190, 64, 64, 0.13);
+  color: #ff9999;
+}
+
+.sv-dialog-icon.success {
+  border-color: rgba(89, 207, 147, 0.25);
+  background: rgba(61, 179, 116, 0.13);
+  color: #83dfad;
+}
+
+.sv-dialog-icon svg {
+  width: 23px;
+  height: 23px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sv-dialog-close {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: #84958a;
+  cursor: pointer;
+}
+
+.sv-dialog-close:hover:not(:disabled) {
+  border-color: #34463b;
+  background: #1c2921;
+  color: #e8f2eb;
+}
+
+.sv-dialog-close:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.sv-dialog-close svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.sv-dialog-content {
+  padding: 22px 23px 24px;
+}
+
+.sv-dialog-eyebrow {
+  color: #70d5a0;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.55px;
+}
+
+.sv-dialog-content h2 {
+  margin: 10px 0 9px;
+  color: #f0f6f1;
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: -0.45px;
+  line-height: 1.35;
+}
+
+.sv-dialog-content p {
+  margin: 0;
+  color: #a3b2a8;
+  font-size: 12px;
+  line-height: 1.75;
+}
+
+.sv-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 15px 23px;
+  border-top: 1px solid rgba(133, 164, 143, 0.12);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.sv-dialog-actions button {
+  display: inline-flex;
+  min-height: 39px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.sv-dialog-actions button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.sv-dialog-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sv-dialog-cancel {
+  border-color: #35453b !important;
+  background: #1b2820;
+  color: #d1ddd4;
+}
+
+.sv-dialog-cancel:hover:not(:disabled) {
+  border-color: #587461 !important;
+  background: #25362b;
+}
+
+.sv-dialog-confirm.danger {
+  border-color: rgba(255, 130, 130, 0.22);
+  background: #a94343;
+  color: #fff;
+}
+
+.sv-dialog-confirm.danger:hover:not(:disabled) {
+  background: #bd5050;
+}
+
+.sv-dialog-confirm.success {
+  background: #238653;
+  color: #fff;
+}
+
+.sv-dialog-confirm.success:hover:not(:disabled) {
+  background: #2b9d64;
+}
+
+.sv-dialog-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: sv-dialog-spin 650ms linear infinite;
+}
+
+.sv-dialog-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 23px 17px;
+  color: #718278;
+  font-size: 9px;
+}
+
+.sv-dialog-footer-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #65d49a;
+  box-shadow: 0 0 8px rgba(101, 212, 154, 0.5);
+}
+
+@keyframes sv-dialog-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sv-dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(9px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes sv-dialog-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 480px) {
+  .sv-dialog {
+    border-radius: 15px;
+  }
+
+  .sv-dialog-top {
+    padding: 18px 18px 0;
+  }
+
+  .sv-dialog-content {
+    padding: 19px 18px 21px;
+  }
+
+  .sv-dialog-actions {
+    padding: 13px 18px;
+  }
+
+  .sv-dialog-actions button {
+    flex: 1;
+    padding: 0 10px;
+  }
+
+  .sv-dialog-footer {
+    padding: 0 18px 15px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sv-dialog-backdrop,
+  .sv-dialog,
+  .sv-dialog-spinner {
+    animation-duration: 0.01ms;
+  }
+}

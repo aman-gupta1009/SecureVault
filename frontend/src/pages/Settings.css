@@ -1,0 +1,451 @@
+
+/* =====================================================
+   SECUREVAULT SETTINGS
+   Supports all six application themes
+===================================================== */
+
+.sv-settings-page {
+  width: 100%;
+  max-width: 1250px;
+  margin: 0 auto;
+  padding: 8px 2px 32px;
+  color: var(--sv-text);
+  animation: sv-settings-enter 180ms ease-out;
+}
+
+@keyframes sv-settings-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sv-settings-heading {
+  margin-bottom: 27px;
+}
+
+.sv-settings-eyebrow {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--sv-accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.6px;
+}
+
+.sv-settings-heading h1 {
+  margin: 0;
+  color: var(--sv-text);
+  font-size: clamp(25px, 3vw, 34px);
+  font-weight: 800;
+  letter-spacing: -1px;
+}
+
+.sv-settings-heading p {
+  max-width: 650px;
+  margin: 9px 0 0;
+  color: var(--sv-text-muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* Settings home cards */
+
+.sv-settings-home-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 17px;
+}
+
+.sv-settings-home-card {
+  display: flex;
+  min-height: 225px;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 21px;
+  border: 1px solid var(--sv-border);
+  border-radius: 16px;
+  background: var(--sv-surface);
+  color: var(--sv-text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.sv-settings-home-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--sv-accent);
+  background: var(--sv-surface-raised);
+}
+
+.sv-settings-home-card:focus-visible,
+.sv-settings-back:focus-visible,
+.sv-settings-action:focus-visible,
+.sv-settings-detail-card:focus-visible,
+.sv-theme-card:focus-visible {
+  outline: 2px solid var(--sv-accent);
+  outline-offset: 3px;
+}
+
+.sv-settings-home-icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 20px;
+  place-items: center;
+  border: 1px solid var(--sv-border);
+  border-radius: 13px;
+  background: var(--sv-surface-raised);
+  color: var(--sv-accent);
+  font-size: 25px;
+}
+
+.sv-settings-home-label {
+  margin-bottom: 7px;
+  color: var(--sv-accent);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.3px;
+}
+
+.sv-settings-home-card > strong {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.sv-settings-home-card p {
+  margin: 8px 0 16px;
+  color: var(--sv-text-muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.sv-settings-card-link {
+  margin-top: auto;
+  color: var(--sv-accent);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+/* Back button */
+
+.sv-settings-back {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 23px;
+  padding: 0 12px;
+  border: 1px solid var(--sv-border);
+  border-radius: 9px;
+  background: var(--sv-surface);
+  color: var(--sv-text);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sv-settings-back:hover {
+  border-color: var(--sv-accent);
+  background: var(--sv-surface-raised);
+}
+
+/* Current theme information */
+
+.sv-settings-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 20px;
+  padding: 17px 19px;
+  border: 1px solid var(--sv-border);
+  border-radius: 13px;
+  background: var(--sv-surface);
+}
+
+.sv-settings-current > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.sv-settings-current > div > span {
+  color: var(--sv-text-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+}
+
+.sv-settings-current strong {
+  color: var(--sv-text);
+  font-size: 15px;
+}
+
+.sv-settings-saved {
+  color: var(--sv-accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* Theme selection grid */
+
+.sv-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 15px;
+}
+
+.sv-theme-card {
+  position: relative;
+  display: flex;
+  min-height: 175px;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 17px;
+  border: 1px solid var(--sv-border);
+  border-radius: 14px;
+  background: var(--sv-surface);
+  color: var(--sv-text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.sv-theme-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--sv-accent);
+}
+
+.sv-theme-card.selected {
+  border: 2px solid var(--sv-accent);
+  padding: 16px;
+  background: var(--sv-surface-raised);
+}
+
+.sv-theme-card-top {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.sv-theme-icon {
+  display: grid;
+  width: 37px;
+  height: 37px;
+  place-items: center;
+  border: 1px solid var(--sv-border);
+  border-radius: 11px;
+  background: var(--sv-surface-raised);
+  color: var(--sv-accent);
+  font-size: 22px;
+}
+
+.sv-theme-selected,
+.sv-theme-default {
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.sv-theme-selected {
+  color: var(--sv-accent);
+}
+
+.sv-theme-default {
+  color: var(--sv-text-muted);
+}
+
+.sv-theme-card > strong {
+  margin-bottom: 5px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.sv-theme-card > small {
+  color: var(--sv-text-muted);
+  font-size: 10px;
+}
+
+.sv-theme-swatches {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 17px;
+}
+
+.sv-theme-swatches span {
+  width: 23px;
+  height: 23px;
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 7px;
+}
+
+/* Detail cards */
+
+.sv-settings-detail-card {
+  display: flex;
+  width: 100%;
+  min-height: 85px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid var(--sv-border);
+  border-radius: 13px;
+  background: var(--sv-surface);
+  color: var(--sv-text);
+  text-align: left;
+}
+
+.sv-settings-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sv-settings-detail-list .sv-settings-detail-card {
+  cursor: pointer;
+  transition: border-color 180ms ease, background 180ms ease;
+}
+
+.sv-settings-detail-list .sv-settings-detail-card:hover {
+  border-color: var(--sv-accent);
+  background: var(--sv-surface-raised);
+}
+
+.sv-settings-detail-card > div {
+  min-width: 0;
+}
+
+.sv-settings-detail-card strong {
+  display: block;
+  font-size: 13px;
+}
+
+.sv-settings-detail-card p {
+  margin: 6px 0 0;
+  color: var(--sv-text-muted);
+  font-size: 11px;
+}
+
+.sv-settings-action {
+  flex-shrink: 0;
+  min-height: 37px;
+  padding: 0 13px;
+  border: 1px solid var(--sv-accent);
+  border-radius: 9px;
+  background: var(--sv-accent);
+  color: var(--sv-accent-text);
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.sv-settings-action:hover {
+  background: var(--sv-accent-hover);
+}
+
+.sv-settings-detail-icon {
+  display: grid;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid var(--sv-border);
+  border-radius: 11px;
+  background: var(--sv-surface-raised);
+  color: var(--sv-accent);
+  font-size: 21px;
+}
+
+.sv-settings-detail-list .sv-settings-detail-card > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+
+.sv-settings-detail-list .sv-settings-detail-card small {
+  display: block;
+  margin-top: 5px;
+  color: var(--sv-text-muted);
+  font-size: 10px;
+}
+
+.sv-settings-arrow {
+  color: var(--sv-accent);
+  font-size: 20px;
+}
+
+/* Information notice */
+
+.sv-settings-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-top: 22px;
+  padding: 14px 16px;
+  border: 1px solid var(--sv-border);
+  border-radius: 11px;
+  background: var(--sv-surface);
+}
+
+.sv-settings-info > span {
+  display: grid;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--sv-surface-raised);
+  color: var(--sv-accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sv-settings-info p {
+  margin: 2px 0 0;
+  color: var(--sv-text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* Responsive layout */
+
+@media (max-width: 900px) {
+  .sv-settings-home-grid,
+  .sv-theme-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 580px) {
+  .sv-settings-home-grid,
+  .sv-theme-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sv-settings-current {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .sv-settings-detail-card {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .sv-settings-action {
+    width: 100%;
+  }
+}

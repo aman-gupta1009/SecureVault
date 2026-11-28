@@ -1,16 +1,14 @@
+
+const { pool } = require("../config/database");
+
 const {
     saveEncryptedFile,
     readDecryptedFile,
     deleteUserFile
 } = require("../services/vaultService");
 
-const {
-    verifyUserPassword
-} = require("../services/authService");
-
-const {
-    getUserFiles
-} = require("../services/fileManagementService");
+const { verifyUserPassword } = require("../services/authService");
+const { getUserFiles } = require("../services/fileManagementService");
 
 const {
     unlockVault,
@@ -19,9 +17,193 @@ const {
     requireUnlockedVault
 } = require("../services/vaultLockService");
 
-const {
-    logSecurityEvent
-} = require("../services/securityEventService");
+const { logSecurityEvent } = require("../services/securityEventService");
+
+
+// =====================================================
+// PREVIEW MIME CONFIGURATION
+// =====================================================
+
+// Only these types can be rendered by the frontend.
+// Unknown and active-content formats are delivered as
+// application/octet-stream instead.
+const SAFE_PREVIEW_TYPES = new Set([
+    // Images
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+
+    // Documents
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/msword",
+
+    // Spreadsheets
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "text/csv",
+
+    // Presentations
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+
+    // Text
+    "text/plain",
+    "text/markdown",
+    "application/json",
+    "application/xml",
+    "text/xml",
+
+    // Audio
+    "audio/mpeg",
+    "audio/wav",
+    "audio/ogg",
+    "audio/mp4",
+    "audio/webm",
+
+    // Video
+    "video/mp4",
+    "video/webm",
+    "video/ogg"
+]);
+
+const EXTENSION_MIME_TYPES = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    bmp: "image/bmp",
+
+    pdf: "application/pdf",
+
+    doc: "application/msword",
+
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    xls: "application/vnd.ms-excel",
+    csv: "text/csv",
+
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+
+    txt: "text/plain",
+    md: "text/markdown",
+    json: "application/json",
+    xml: "application/xml",
+
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    ogg: "audio/ogg",
+    m4a: "audio/mp4",
+
+    mp4: "video/mp4",
+    webm: "video/webm",
+    ogv: "video/ogg"
+};
+
+function getPreviewMimeType(file) {
+    const originalName = String(file.original_name || "");
+    const extension = originalName.includes(".")
+        ? originalName.split(".").pop().toLowerCase()
+        : "";
+
+    const extensionMime = EXTENSION_MIME_TYPES[extension];
+    const storedMime = String(file.mime_type || "")
+        .split(";")[0]
+        .trim()
+        .toLowerCase();
+
+    // Prefer a recognized extension when the stored MIME
+    // is missing or generic.
+    if (
+        extensionMime &&
+        (
+            !storedMime ||
+            storedMime === "application/octet-stream"
+        )
+    ) {
+        return extensionMime;
+    }
+
+    if (SAFE_PREVIEW_TYPES.has(storedMime)) {
+        return storedMime;
+    }
+
+    if (extensionMime && SAFE_PREVIEW_TYPES.has(extensionMime)) {
+        return extensionMime;
+    }
+
+    return "application/octet-stream";
+}
+
+function safeDownloadName(value) {
+    return String(value || "file")
+        .replace(/[\r\n"]/g, "_")
+        .replace(/[\\/]/g, "_");
+}
+
+async function logFileIntegrityFailure(req, fileId, reason) {
+    try {
+        await logSecurityEvent({
+            userId: req.user.userId,
+            eventType: "FILE_INTEGRITY_FAILED",
+            req,
+            metadata: {
+                fileId,
+                reason
+            }
+        });
+    } catch (auditError) {
+        console.error(
+            "FILE_INTEGRITY_FAILED audit failed:",
+            auditError.message
+        );
+    }
+}
+
+function handleReadFileError(error, req, res, fileId) {
+    if (error.message === "FILE_NOT_FOUND") {
+        return res.status(404).json({
+            success: false,
+            message: "File not found."
+        });
+    }
+
+    if (error.message === "FILE_INTEGRITY_CHECK_FAILED") {
+        logFileIntegrityFailure(
+            req,
+            fileId,
+            "PLAINTEXT_HASH_MISMATCH"
+        );
+
+        return res.status(409).json({
+            success: false,
+            message:
+                "File integrity verification failed. The stored file may have been modified or corrupted."
+        });
+    }
+
+    if (
+        error.message ===
+        "Unsupported state or unable to authenticate data"
+    ) {
+        logFileIntegrityFailure(
+            req,
+            fileId,
+            "AES_GCM_AUTHENTICATION_FAILED"
+        );
+
+        return res.status(409).json({
+            success: false,
+            message:
+                "File integrity verification failed. The stored file may have been modified or corrupted."
+        });
+    }
+
+    return null;
+}
 
 
 // =====================================================
@@ -30,11 +212,6 @@ const {
 
 async function uploadFiles(req, res, next) {
     try {
-        await requireUnlockedVault(
-            req.user.userId,
-            req
-        );
-
         if (!req.files || req.files.length === 0) {
             return res.status(400).json({
                 success: false,
@@ -74,12 +251,11 @@ async function uploadFiles(req, res, next) {
 
         return res.status(201).json({
             success: true,
-            message: "File(s) uploaded successfully.",
+            message: "File(s) encrypted and uploaded successfully.",
             data: {
                 files: uploadedFiles
             }
         });
-
     } catch (error) {
         next(error);
     }
@@ -92,16 +268,7 @@ async function uploadFiles(req, res, next) {
 
 async function listFiles(req, res, next) {
     try {
-        await requireUnlockedVault(
-            req.user.userId,
-            req
-        );
-
-        // -------------------------------------------------
-        // IMPORTANT:
-        // Do not use Number(req.query.page || 1)
-        // because 0 is falsy in JavaScript.
-        // -------------------------------------------------
+        await requireUnlockedVault(req.user.userId, req);
 
         const page = req.query.page === undefined
             ? 1
@@ -120,36 +287,19 @@ async function listFiles(req, res, next) {
             : "";
 
         const sortBy = req.query.sortBy
-            ? String(req.query.sortBy)
-                .trim()
-                .toLowerCase()
+            ? String(req.query.sortBy).trim().toLowerCase()
             : "date";
 
         const sortOrder = req.query.sortOrder
-            ? String(req.query.sortOrder)
-                .trim()
-                .toLowerCase()
+            ? String(req.query.sortOrder).trim().toLowerCase()
             : "desc";
 
-
-        // -------------------------------------------------
-        // PAGE VALIDATION
-        // -------------------------------------------------
-
-        if (
-            !Number.isInteger(page) ||
-            page < 1
-        ) {
+        if (!Number.isInteger(page) || page < 1) {
             return res.status(400).json({
                 success: false,
                 message: "Page must be a positive integer."
             });
         }
-
-
-        // -------------------------------------------------
-        // LIMIT VALIDATION
-        // -------------------------------------------------
 
         if (
             !Number.isInteger(limit) ||
@@ -162,11 +312,6 @@ async function listFiles(req, res, next) {
             });
         }
 
-
-        // -------------------------------------------------
-        // SEARCH VALIDATION
-        // -------------------------------------------------
-
         if (search.length > 255) {
             return res.status(400).json({
                 success: false,
@@ -174,22 +319,12 @@ async function listFiles(req, res, next) {
             });
         }
 
-
-        // -------------------------------------------------
-        // MIME TYPE VALIDATION
-        // -------------------------------------------------
-
         if (mimeType.length > 100) {
             return res.status(400).json({
                 success: false,
                 message: "MIME type must not exceed 100 characters."
             });
         }
-
-
-        // -------------------------------------------------
-        // SORT BY VALIDATION
-        // -------------------------------------------------
 
         const allowedSortFields = new Set([
             "name",
@@ -200,15 +335,9 @@ async function listFiles(req, res, next) {
         if (!allowedSortFields.has(sortBy)) {
             return res.status(400).json({
                 success: false,
-                message:
-                    "Invalid sortBy. Use name, size, or date."
+                message: "Invalid sortBy. Use name, size, or date."
             });
         }
-
-
-        // -------------------------------------------------
-        // SORT ORDER VALIDATION
-        // -------------------------------------------------
 
         const allowedSortOrders = new Set([
             "asc",
@@ -218,15 +347,9 @@ async function listFiles(req, res, next) {
         if (!allowedSortOrders.has(sortOrder)) {
             return res.status(400).json({
                 success: false,
-                message:
-                    "Invalid sortOrder. Use asc or desc."
+                message: "Invalid sortOrder. Use asc or desc."
             });
         }
-
-
-        // -------------------------------------------------
-        // GET FILES
-        // -------------------------------------------------
 
         const result = await getUserFiles(
             req.user.userId,
@@ -245,7 +368,6 @@ async function listFiles(req, res, next) {
             message: "Files retrieved successfully.",
             data: result
         });
-
     } catch (error) {
         next(error);
     }
@@ -260,58 +382,35 @@ async function downloadFile(req, res, next) {
     const fileId = Number(req.params.fileId);
 
     try {
-        await requireUnlockedVault(
-            req.user.userId,
-            req
-        );
+        await requireUnlockedVault(req.user.userId, req);
 
-        if (
-            !Number.isInteger(fileId) ||
-            fileId <= 0
-        ) {
+        if (!Number.isInteger(fileId) || fileId <= 0) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid file ID."
             });
         }
 
-        const result = await readDecryptedFile(
+        const { file, data } = await readDecryptedFile(
             req.user.userId,
             fileId
         );
 
-        const {
-            file,
-            data
-        } = result;
-
-
-        // -------------------------------------------------
-        // RESPONSE HEADERS
-        // -------------------------------------------------
+        const safeName = safeDownloadName(file.original_name);
 
         res.setHeader(
             "Content-Type",
-            file.mime_type ||
-            "application/octet-stream"
+            file.mime_type || "application/octet-stream"
         );
 
         res.setHeader(
             "Content-Disposition",
-            `attachment; filename="${encodeURIComponent(
-                file.original_name
-            )}"`
+            `attachment; filename="${encodeURIComponent(safeName)}"`
         );
 
-        res.setHeader(
-            "Content-Length",
-            data.length
-        );
-
-
-        // -------------------------------------------------
-        // SECURITY AUDIT
-        // -------------------------------------------------
+        res.setHeader("Content-Length", data.length);
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("Cache-Control", "private, no-store");
 
         try {
             await logSecurityEvent({
@@ -332,91 +431,175 @@ async function downloadFile(req, res, next) {
             );
         }
 
+        return res.send(data);
+    } catch (error) {
+        const handled = handleReadFileError(
+            error,
+            req,
+            res,
+            fileId
+        );
+
+        if (handled) return handled;
+
+        next(error);
+    }
+}
+
+
+// =====================================================
+// VIEW / PREVIEW FILE
+// =====================================================
+
+async function viewFile(req, res, next) {
+    const fileId = Number(req.params.fileId);
+
+    try {
+        await requireUnlockedVault(req.user.userId, req);
+
+        if (!Number.isInteger(fileId) || fileId <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid file ID."
+            });
+        }
+
+        const { file, data } = await readDecryptedFile(
+            req.user.userId,
+            fileId
+        );
+
+        const mimeType = getPreviewMimeType(file);
+
+        // Only recognized, safe preview formats are served
+        // with their original MIME type.
+        // Unknown formats are served as binary downloads.
+        const canPreview = mimeType !== "application/octet-stream";
+
+        res.setHeader("Content-Type", mimeType);
+        res.setHeader("Content-Length", data.length);
+
+        res.setHeader(
+            "Content-Disposition",
+            canPreview ? "inline" : "attachment"
+        );
+
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("Cache-Control", "private, no-store");
+
+        // Apply a sandbox policy to previewable formats except PDF.
+        // Chrome's built-in PDF viewer is blocked when the PDF response
+        // carries the CSP sandbox directive. The PDF is still served only
+        // after authentication, vault-unlock checks, and integrity checks.
+        if (mimeType !== "application/pdf") {
+            res.setHeader(
+                "Content-Security-Policy",
+                "default-src 'none'; sandbox"
+            );
+        }
+
+        res.setHeader("X-Frame-Options", "SAMEORIGIN");
+
+        try {
+            await logSecurityEvent({
+                userId: req.user.userId,
+                eventType: "FILE_VIEWED",
+                req,
+                metadata: {
+                    fileId: file.file_id,
+                    originalName: file.original_name,
+                    mimeType,
+                    previewSupported: canPreview
+                }
+            });
+        } catch (auditError) {
+            console.error(
+                "FILE_VIEWED audit failed:",
+                auditError.message
+            );
+        }
 
         return res.send(data);
-
     } catch (error) {
+        const handled = handleReadFileError(
+            error,
+            req,
+            res,
+            fileId
+        );
 
-        // -------------------------------------------------
-        // FILE NOT FOUND
-        // -------------------------------------------------
+        if (handled) return handled;
 
-        if (
-            error.message === "FILE_NOT_FOUND"
-        ) {
-            return res.status(404).json({
+        next(error);
+    }
+}
+
+
+// =====================================================
+// RESTORE FILE TO LOCAL SYSTEM
+// =====================================================
+
+async function restoreFile(req, res, next) {
+    const fileId = Number(req.params.fileId);
+
+    try {
+        await requireUnlockedVault(req.user.userId, req);
+
+        if (!Number.isInteger(fileId) || fileId <= 0) {
+            return res.status(400).json({
                 success: false,
-                message: "File not found."
+                message: "Invalid file ID."
             });
         }
 
+        const { file, data } = await readDecryptedFile(
+            req.user.userId,
+            fileId
+        );
 
-        // -------------------------------------------------
-        // PLAINTEXT HASH INTEGRITY FAILURE
-        // -------------------------------------------------
+        const safeName = safeDownloadName(file.original_name);
 
-        if (
-            error.message ===
-            "FILE_INTEGRITY_CHECK_FAILED"
-        ) {
-            try {
-                await logSecurityEvent({
-                    userId: req.user.userId,
-                    eventType: "FILE_INTEGRITY_FAILED",
-                    req,
-                    metadata: {
-                        fileId,
-                        reason:
-                            "PLAINTEXT_HASH_MISMATCH"
-                    }
-                });
-            } catch (auditError) {
-                console.error(
-                    "FILE_INTEGRITY_FAILED audit failed:",
-                    auditError.message
-                );
-            }
+        res.setHeader(
+            "Content-Type",
+            file.mime_type || "application/octet-stream"
+        );
 
-            return res.status(409).json({
-                success: false,
-                message:
-                    "File integrity verification failed. The stored file may have been modified or corrupted."
+        res.setHeader(
+            "Content-Disposition",
+            `attachment; filename="${encodeURIComponent(safeName)}"`
+        );
+
+        res.setHeader("Content-Length", data.length);
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("Cache-Control", "private, no-store");
+
+        try {
+            await logSecurityEvent({
+                userId: req.user.userId,
+                eventType: "FILE_RESTORED",
+                req,
+                metadata: {
+                    fileId: file.file_id,
+                    originalName: file.original_name
+                }
             });
+        } catch (auditError) {
+            console.error(
+                "FILE_RESTORED audit failed:",
+                auditError.message
+            );
         }
 
+        return res.send(data);
+    } catch (error) {
+        const handled = handleReadFileError(
+            error,
+            req,
+            res,
+            fileId
+        );
 
-        // -------------------------------------------------
-        // AES-GCM AUTHENTICATION FAILURE
-        // -------------------------------------------------
-
-        if (
-            error.message ===
-            "Unsupported state or unable to authenticate data"
-        ) {
-            try {
-                await logSecurityEvent({
-                    userId: req.user.userId,
-                    eventType: "FILE_INTEGRITY_FAILED",
-                    req,
-                    metadata: {
-                        fileId,
-                        reason:
-                            "AES_GCM_AUTHENTICATION_FAILED"
-                    }
-                });
-            } catch (auditError) {
-                console.error(
-                    "FILE_INTEGRITY_FAILED audit failed:",
-                    auditError.message
-                );
-            }
-
-            return res.status(409).json({
-                success: false,
-                message:
-                    "File integrity verification failed. The stored file may have been modified or corrupted."
-            });
-        }
+        if (handled) return handled;
 
         next(error);
     }
@@ -431,15 +614,9 @@ async function deleteFile(req, res, next) {
     const fileId = Number(req.params.fileId);
 
     try {
-        await requireUnlockedVault(
-            req.user.userId,
-            req
-        );
+        await requireUnlockedVault(req.user.userId, req);
 
-        if (
-            !Number.isInteger(fileId) ||
-            fileId <= 0
-        ) {
+        if (!Number.isInteger(fileId) || fileId <= 0) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid file ID."
@@ -450,11 +627,6 @@ async function deleteFile(req, res, next) {
             req.user.userId,
             fileId
         );
-
-
-        // -------------------------------------------------
-        // SECURITY AUDIT
-        // -------------------------------------------------
 
         try {
             await logSecurityEvent({
@@ -472,17 +644,12 @@ async function deleteFile(req, res, next) {
             );
         }
 
-
         return res.status(200).json({
             success: true,
             message: "File deleted successfully."
         });
-
     } catch (error) {
-
-        if (
-            error.message === "FILE_NOT_FOUND"
-        ) {
+        if (error.message === "FILE_NOT_FOUND") {
             return res.status(404).json({
                 success: false,
                 message: "File not found."
@@ -495,7 +662,7 @@ async function deleteFile(req, res, next) {
 
 
 // =====================================================
-// GET VAULT LOCK STATUS
+// VAULT LOCK STATUS
 // =====================================================
 
 async function getLockStatus(req, res, next) {
@@ -508,11 +675,44 @@ async function getLockStatus(req, res, next) {
             success: true,
             data: status
         });
-
     } catch (error) {
         next(error);
     }
 }
+
+
+// =====================================================
+// FILE COUNT
+// =====================================================
+
+
+async function getFileCount(req, res, next) {
+    try {
+        const [rows] = await pool.execute(
+            `
+            SELECT
+                COUNT(*) AS total,
+                COALESCE(SUM(file_size), 0) AS totalStorageBytes
+            FROM vault_files
+            WHERE user_id = ?
+            `,
+            [req.user.userId]
+        );
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                total: Number(rows[0].total || 0),
+                totalStorageBytes: Number(
+                    rows[0].totalStorageBytes || 0
+                )
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
 
 
 // =====================================================
@@ -520,149 +720,73 @@ async function getLockStatus(req, res, next) {
 // =====================================================
 
 async function unlock(req, res, next) {
-
     try {
-
-        // -------------------------------------------------
-        // REQUIRE PASSWORD
-        // -------------------------------------------------
-
-        const password =
-            req.body?.password;
+        const password = req.body?.password;
 
         if (
             typeof password !== "string" ||
             password.length === 0
         ) {
-
             return res.status(400).json({
-
                 success: false,
-
-                message:
-                    "Password is required."
-
+                message: "Password is required."
             });
         }
 
-
-        // -------------------------------------------------
-        // VERIFY USER PASSWORD
-        // -------------------------------------------------
-
         try {
-
             await verifyUserPassword(
                 req.user.userId,
                 password
             );
-
         } catch (error) {
-
-            if (
-                error.message ===
-                "INVALID_PASSWORD"
-            ) {
-
+            if (error.message === "INVALID_PASSWORD") {
                 return res.status(401).json({
-
                     success: false,
-
-                    message:
-                        "Invalid password."
-
+                    message: "Invalid password."
                 });
             }
 
-
-            if (
-                error.message ===
-                "USER_NOT_FOUND"
-            ) {
-
+            if (error.message === "USER_NOT_FOUND") {
                 return res.status(401).json({
-
                     success: false,
-
-                    message:
-                        "Authentication required."
-
+                    message: "Authentication required."
                 });
             }
 
             throw error;
         }
 
-
-        // -------------------------------------------------
-        // PASSWORD VERIFIED
-        // -------------------------------------------------
-
-        const result =
-            await unlockVault(
-                req.user.userId,
-                req
-            );
-
-
-        // -------------------------------------------------
-        // SECURITY AUDIT
-        // -------------------------------------------------
+        const result = await unlockVault(
+            req.user.userId,
+            req
+        );
 
         try {
-
             await logSecurityEvent({
-
-                userId:
-                    req.user.userId,
-
-                eventType:
-                    "VAULT_UNLOCKED",
-
+                userId: req.user.userId,
+                eventType: "VAULT_UNLOCKED",
                 req,
-
                 metadata: {
-
-                    method:
-                        "USER_UNLOCK"
-
+                    method: "USER_UNLOCK"
                 }
-
             });
-
         } catch (auditError) {
-
             console.error(
                 "VAULT_UNLOCKED audit failed:",
                 auditError.message
             );
-
         }
 
-
-        // -------------------------------------------------
-        // RESPONSE
-        // -------------------------------------------------
-
         return res.status(200).json({
-
             success: true,
-
-            message:
-                "Vault unlocked successfully.",
-
-            data:
-                result
-
+            message: "Vault unlocked successfully.",
+            data: result
         });
-
     } catch (error) {
-
         next(error);
-
     }
-
 }
+
 
 // =====================================================
 // LOCK VAULT
@@ -696,7 +820,6 @@ async function lock(req, res, next) {
             message: "Vault locked successfully.",
             data: result
         });
-
     } catch (error) {
         next(error);
     }
@@ -711,8 +834,11 @@ module.exports = {
     uploadFiles,
     listFiles,
     downloadFile,
+    viewFile,
+    restoreFile,
     deleteFile,
     getLockStatus,
+    getFileCount,
     unlock,
     lock
 };

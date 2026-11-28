@@ -2,20 +2,15 @@
 const fs = require("fs/promises");
 const path = require("path");
 const crypto = require("crypto");
+const { constants } = require("fs");
 const { pool } = require("../config/database");
 
 const ENCRYPTED_STORAGE_DIR = path.resolve(
-    __dirname,
-    "..",
-    "storage",
-    "encrypted"
+    __dirname, "..", "storage", "encrypted"
 );
 
 const BACKUP_ROOT_DIR = path.resolve(
-    __dirname,
-    "..",
-    "storage",
-    "backups"
+    __dirname, "..", "storage", "backups"
 );
 
 const MANIFEST_FILE = "manifest.json";
@@ -27,10 +22,7 @@ function sha256(data) {
 function getBackupHmacKey() {
     const key = process.env.BACKUP_MANIFEST_HMAC_KEY;
 
-    if (
-        typeof key !== "string" ||
-        !/^[a-f0-9]{64}$/i.test(key)
-    ) {
+    if (typeof key !== "string" || !/^[a-f0-9]{64}$/i.test(key)) {
         throw new Error(
             "BACKUP_MANIFEST_HMAC_KEY is missing or invalid."
         );
@@ -61,6 +53,7 @@ function verifyManifestHmac(manifest, expectedHmac) {
         Buffer.from(actualHmac, "hex")
     );
 }
+
 function safeHashEquals(expected, actual) {
     if (
         typeof expected !== "string" ||
@@ -102,9 +95,9 @@ async function ensureDirectories() {
 }
 
 function calculateManifestHash(manifest) {
-    // The manifest hash is calculated from the parsed JSON data,
-    // not from its whitespace or indentation.
-    return sha256(Buffer.from(JSON.stringify(manifest), "utf8"));
+    return sha256(
+        Buffer.from(JSON.stringify(manifest), "utf8")
+    );
 }
 
 async function readAndVerifyBackup(backup) {
@@ -124,12 +117,18 @@ async function readAndVerifyBackup(backup) {
     const realBackupPath = await fs.realpath(backupPath);
 
     if (!isInsideDirectory(realBackupRoot, realBackupPath)) {
-        const error = new Error("Backup directory is outside storage.");
+        const error = new Error(
+            "Backup directory is outside storage."
+        );
         error.code = "BACKUP_INVALID_PATH";
         throw error;
     }
 
-    const manifestPath = path.join(realBackupPath, MANIFEST_FILE);
+    const manifestPath = path.join(
+        realBackupPath,
+        MANIFEST_FILE
+    );
+
     const manifestText = await fs.readFile(manifestPath, "utf8");
 
     let manifest;
@@ -147,31 +146,39 @@ async function readAndVerifyBackup(backup) {
         manifest.version !== 2 ||
         !Array.isArray(manifest.files)
     ) {
-        const error = new Error("Unsupported or invalid backup manifest.");
+        const error = new Error(
+            "Unsupported or invalid backup manifest."
+        );
         error.code = "BACKUP_MANIFEST_INVALID";
         throw error;
     }
+
     const storedHmac = manifest.hmac;
-const manifestWithoutHmac = { ...manifest };
+    const manifestWithoutHmac = { ...manifest };
+    delete manifestWithoutHmac.hmac;
 
-delete manifestWithoutHmac.hmac;
-
-if (!verifyManifestHmac(manifestWithoutHmac, storedHmac)) {
-    const error = new Error("Backup manifest authentication failed.");
-    error.code = "BACKUP_INTEGRITY_FAILED";
-    throw error;
-}
-    const manifestHash = calculateManifestHash(manifest);
-    if (!safeHashEquals(backup.backup_hash, manifestHash)) {
-        const error = new Error("Backup manifest integrity check failed.");
+    if (!verifyManifestHmac(manifestWithoutHmac, storedHmac)) {
+        const error = new Error(
+            "Backup manifest authentication failed."
+        );
         error.code = "BACKUP_INTEGRITY_FAILED";
         throw error;
     }
 
-    if (
-        Number(backup.file_count) !== manifest.files.length
-    ) {
-        const error = new Error("Backup file count does not match manifest.");
+    const manifestHash = calculateManifestHash(manifest);
+
+    if (!safeHashEquals(backup.backup_hash, manifestHash)) {
+        const error = new Error(
+            "Backup manifest integrity check failed."
+        );
+        error.code = "BACKUP_INTEGRITY_FAILED";
+        throw error;
+    }
+
+    if (Number(backup.file_count) !== manifest.files.length) {
+        const error = new Error(
+            "Backup file count does not match manifest."
+        );
         error.code = "BACKUP_INTEGRITY_FAILED";
         throw error;
     }
@@ -185,17 +192,25 @@ if (!verifyManifestHmac(manifestWithoutHmac, storedHmac)) {
             !Number.isSafeInteger(entry.encryptedSize) ||
             entry.encryptedSize < 0 ||
             !entry.metadata ||
-            !safeHashEquals(entry.encryptedSha256, entry.encryptedSha256)
+            typeof entry.encryptedSha256 !== "string" ||
+            !/^[a-f0-9]{64}$/i.test(entry.encryptedSha256)
         ) {
-            const error = new Error("Invalid file entry in manifest.");
+            const error = new Error(
+                "Invalid file entry in manifest."
+            );
             error.code = "BACKUP_MANIFEST_INVALID";
             throw error;
         }
 
-        const filePath = path.resolve(realBackupPath, entry.backupFileName);
+        const filePath = path.resolve(
+            realBackupPath,
+            entry.backupFileName
+        );
 
         if (!isInsideDirectory(realBackupPath, filePath)) {
-            const error = new Error("Invalid file path in manifest.");
+            const error = new Error(
+                "Invalid file path in manifest."
+            );
             error.code = "BACKUP_INVALID_PATH";
             throw error;
         }
@@ -203,7 +218,9 @@ if (!verifyManifestHmac(manifestWithoutHmac, storedHmac)) {
         const realFilePath = await fs.realpath(filePath);
 
         if (!isInsideDirectory(realBackupPath, realFilePath)) {
-            const error = new Error("Backup file is outside its directory.");
+            const error = new Error(
+                "Backup file is outside its directory."
+            );
             error.code = "BACKUP_INVALID_PATH";
             throw error;
         }
@@ -211,15 +228,24 @@ if (!verifyManifestHmac(manifestWithoutHmac, storedHmac)) {
         const stat = await fs.stat(realFilePath);
 
         if (!stat.isFile() || stat.size !== entry.encryptedSize) {
-            const error = new Error("Backup file size verification failed.");
+            const error = new Error(
+                "Backup file size verification failed."
+            );
             error.code = "BACKUP_INTEGRITY_FAILED";
             throw error;
         }
 
         const encryptedData = await fs.readFile(realFilePath);
 
-        if (!safeHashEquals(entry.encryptedSha256, sha256(encryptedData))) {
-            const error = new Error("Encrypted file integrity check failed.");
+        if (
+            !safeHashEquals(
+                entry.encryptedSha256,
+                sha256(encryptedData)
+            )
+        ) {
+            const error = new Error(
+                "Encrypted file integrity check failed."
+            );
             error.code = "BACKUP_INTEGRITY_FAILED";
             throw error;
         }
@@ -228,7 +254,9 @@ if (!verifyManifestHmac(manifestWithoutHmac, storedHmac)) {
     }
 
     if (calculatedTotalSize !== Number(backup.total_size)) {
-        const error = new Error("Backup total size does not match manifest.");
+        const error = new Error(
+            "Backup total size does not match manifest."
+        );
         error.code = "BACKUP_INTEGRITY_FAILED";
         throw error;
     }
@@ -238,6 +266,7 @@ if (!verifyManifestHmac(manifestWithoutHmac, storedHmac)) {
         manifest
     };
 }
+
 
 async function createBackup(userId) {
     await ensureDirectories();
@@ -269,32 +298,55 @@ async function createBackup(userId) {
     const backupName = `backup-${backupIdToken}`;
     const backupPath = path.join(BACKUP_ROOT_DIR, backupName);
 
+    // Validate configuration before creating backup files.
+    getBackupHmacKey();
+
     await fs.mkdir(backupPath, { recursive: false });
 
-    const manifest = {
-        version: 2,
-        createdAt: new Date().toISOString(),
-        files: []
-    };
-
-    let totalSize = 0;
-
     try {
-        const realEncryptedRoot = await fs.realpath(ENCRYPTED_STORAGE_DIR);
+        const realBackupRoot = await fs.realpath(BACKUP_ROOT_DIR);
+        const realBackupPath = await fs.realpath(backupPath);
+
+        if (
+            !isInsideDirectory(realBackupRoot, realBackupPath) ||
+            path.basename(realBackupPath) !== backupName
+        ) {
+            const error = new Error(
+                "Backup directory failed path validation."
+            );
+            error.code = "BACKUP_INVALID_PATH";
+            throw error;
+        }
+
+        const realEncryptedRoot = await fs.realpath(
+            ENCRYPTED_STORAGE_DIR
+        );
+
+        const manifest = {
+            version: 2,
+            createdAt: new Date().toISOString(),
+            files: []
+        };
+
+        let totalSize = 0;
 
         for (const file of vaultFiles) {
             if (!validateVaultFileName(file.stored_name)) {
-                throw new Error(
+                const error = new Error(
                     `Invalid stored file name for vault file ${file.file_id}.`
                 );
+                error.code = "VAULT_FILE_INVALID";
+                throw error;
             }
 
             const sourcePath = path.resolve(file.storage_path);
 
             if (!isInsideDirectory(realEncryptedRoot, sourcePath)) {
-                throw new Error(
+                const error = new Error(
                     `Vault file path is outside encrypted storage: ${file.stored_name}`
                 );
+                error.code = "VAULT_FILE_INVALID_PATH";
+                throw error;
             }
 
             const realSourcePath = await fs.realpath(sourcePath);
@@ -303,38 +355,51 @@ async function createBackup(userId) {
                 !isInsideDirectory(realEncryptedRoot, realSourcePath) ||
                 path.basename(realSourcePath) !== file.stored_name
             ) {
-                throw new Error(
+                const error = new Error(
                     `Unsafe vault file path: ${file.stored_name}`
                 );
+                error.code = "VAULT_FILE_INVALID_PATH";
+                throw error;
             }
 
-            const stat = await fs.stat(realSourcePath);
+            const sourceStat = await fs.stat(realSourcePath);
 
-            if (!stat.isFile()) {
-                throw new Error(`Vault storage entry is not a file.`);
+            if (!sourceStat.isFile()) {
+                const error = new Error(
+                    `Vault storage entry is not a regular file: ${file.stored_name}`
+                );
+                error.code = "VAULT_FILE_INVALID";
+                throw error;
             }
 
             const encryptedData = await fs.readFile(realSourcePath);
             const encryptedSha256 = sha256(encryptedData);
 
             const destinationPath = path.join(
-                backupPath,
+                realBackupPath,
                 file.stored_name
             );
 
             await fs.copyFile(
                 realSourcePath,
                 destinationPath,
-                require("fs").constants.COPYFILE_EXCL
+                constants.COPYFILE_EXCL
             );
 
-            // Check the copied bytes too, not just the source.
             const copiedData = await fs.readFile(destinationPath);
 
-            if (!safeHashEquals(encryptedSha256, sha256(copiedData))) {
-                throw new Error(
+            if (
+                copiedData.length !== encryptedData.length ||
+                !safeHashEquals(
+                    encryptedSha256,
+                    sha256(copiedData)
+                )
+            ) {
+                const error = new Error(
                     `Backup copy verification failed: ${file.stored_name}`
                 );
+                error.code = "BACKUP_INTEGRITY_FAILED";
+                throw error;
             }
 
             manifest.files.push({
@@ -356,21 +421,35 @@ async function createBackup(userId) {
             });
 
             totalSize += copiedData.length;
+
+            encryptedData.fill(0);
+            copiedData.fill(0);
         }
 
         const manifestHmac = calculateManifestHmac(manifest);
+        manifest.hmac = manifestHmac;
 
-manifest.hmac = manifestHmac;
+        await fs.writeFile(
+            path.join(realBackupPath, MANIFEST_FILE),
+            JSON.stringify(manifest, null, 2),
+            {
+                flag: "wx",
+                encoding: "utf8"
+            }
+        );
 
-const manifestText = JSON.stringify(manifest, null, 2);
+        const backupHash = calculateManifestHash(manifest);
 
-await fs.writeFile(
-    path.join(backupPath, MANIFEST_FILE),
-    manifestText,
-    { flag: "wx", encoding: "utf8" }
-);
+        // Validate the completed backup before registering it in MySQL.
+        const temporaryBackupRecord = {
+            backup_name: backupName,
+            backup_path: realBackupPath,
+            backup_hash: backupHash,
+            file_count: manifest.files.length,
+            total_size: totalSize
+        };
 
-const backupHash = calculateManifestHash(manifest);
+        await readAndVerifyBackup(temporaryBackupRecord);
 
         await pool.execute(
             `
@@ -389,7 +468,7 @@ const backupHash = calculateManifestHash(manifest);
             [
                 userId,
                 backupName,
-                backupPath,
+                realBackupPath,
                 manifest.files.length,
                 totalSize,
                 backupHash
@@ -404,10 +483,33 @@ const backupHash = calculateManifestHash(manifest);
             integrity: "VERIFIED"
         };
     } catch (error) {
-        await fs.rm(backupPath, { recursive: true, force: true });
+        try {
+            await fs.rm(backupPath, {
+                recursive: true,
+                force: false
+            });
+        } catch (cleanupError) {
+            console.error(
+                "BACKUP CREATION CLEANUP ERROR:",
+                {
+                    backupName,
+                    backupPath,
+                    originalError: error.message,
+                    cleanupError: cleanupError.message
+                }
+            );
+
+            error.cleanupRequired = true;
+            error.backupName = backupName;
+            error.message =
+                `${error.message} ` +
+                `Cleanup also failed; inspect backup directory ${backupName}.`;
+        }
+
         throw error;
     }
 }
+
 
 async function listBackups(userId) {
     const [rows] = await pool.execute(
@@ -434,8 +536,15 @@ async function listBackups(userId) {
 async function verifyBackup(userId, backupId) {
     const [rows] = await pool.execute(
         `
-        SELECT backup_id, user_id, backup_name, backup_path,
-               file_count, total_size, backup_hash, status
+        SELECT
+            backup_id,
+            user_id,
+            backup_name,
+            backup_path,
+            file_count,
+            total_size,
+            backup_hash,
+            status
         FROM backups
         WHERE backup_id = ? AND user_id = ?
         LIMIT 1
@@ -459,13 +568,21 @@ async function verifyBackup(userId, backupId) {
     };
 }
 
+
 async function restoreBackup(userId, backupId) {
     await ensureDirectories();
 
     const [rows] = await pool.execute(
         `
-        SELECT backup_id, user_id, backup_name, backup_path,
-               file_count, total_size, backup_hash, status
+        SELECT
+            backup_id,
+            user_id,
+            backup_name,
+            backup_path,
+            file_count,
+            total_size,
+            backup_hash,
+            status
         FROM backups
         WHERE backup_id = ? AND user_id = ?
         LIMIT 1
@@ -484,30 +601,135 @@ async function restoreBackup(userId, backupId) {
 
     const connection = await pool.getConnection();
     const createdPaths = [];
+
+    let commitAttempted = false;
+    let rollbackSucceeded = false;
+
     let restoredCount = 0;
+    let skippedCount = 0;
 
     try {
         await connection.beginTransaction();
 
-        const realEncryptedRoot = await fs.realpath(ENCRYPTED_STORAGE_DIR);
+        // Serialize restores of the same backup.
+        const [lockedBackups] = await connection.execute(
+            `
+            SELECT backup_id
+            FROM backups
+            WHERE backup_id = ? AND user_id = ?
+              AND status = 'COMPLETED'
+            FOR UPDATE
+            `,
+            [backupId, userId]
+        );
+
+        if (lockedBackups.length === 0) {
+            const error = new Error("Backup is no longer available.");
+            error.code = "BACKUP_NOT_FOUND";
+            throw error;
+        }
+
+        const realEncryptedRoot = await fs.realpath(
+            ENCRYPTED_STORAGE_DIR
+        );
 
         for (const entry of manifest.files) {
             const metadata = entry.metadata;
 
             if (
+                !metadata ||
+                typeof metadata.originalFileId !== "string" ||
+                !/^[1-9]\d{0,19}$/.test(metadata.originalFileId) ||
                 typeof metadata.originalName !== "string" ||
-                metadata.originalName.length === 0 ||
+                metadata.originalName.trim().length === 0 ||
                 metadata.originalName.length > 255 ||
                 !Number.isSafeInteger(metadata.fileSize) ||
                 metadata.fileSize < 0 ||
-                !Number.isInteger(metadata.keyVersion) ||
+                !Number.isSafeInteger(metadata.keyVersion) ||
                 metadata.keyVersion < 1 ||
                 typeof metadata.encryptedDek !== "string" ||
                 typeof metadata.fileIv !== "string" ||
                 typeof metadata.fileAuthTag !== "string" ||
-                typeof metadata.encryptionVersion !== "string"
+                metadata.encryptionVersion !== "v1" ||
+                typeof metadata.fileHash !== "string" ||
+                !/^[a-f0-9]{64}$/i.test(metadata.fileHash) ||
+                !(
+                    metadata.mimeType === null ||
+                    typeof metadata.mimeType === "string"
+                )
             ) {
-                throw new Error("Invalid vault metadata in backup manifest.");
+                const error = new Error(
+                    "Invalid vault metadata in backup manifest."
+                );
+                error.code = "BACKUP_METADATA_INVALID";
+                throw error;
+            }
+
+            let encryptedDEK;
+
+            try {
+                encryptedDEK = JSON.parse(metadata.encryptedDek);
+            } catch {
+                const error = new Error(
+                    "Invalid encrypted DEK metadata."
+                );
+                error.code = "BACKUP_METADATA_INVALID";
+                throw error;
+            }
+
+            function isCanonicalBase64(value, expectedLength) {
+                if (
+                    typeof value !== "string" ||
+                    value.length === 0
+                ) {
+                    return false;
+                }
+
+                const decoded = Buffer.from(value, "base64");
+
+                try {
+                    return (
+                        decoded.length === expectedLength &&
+                        decoded.toString("base64") === value
+                    );
+                } finally {
+                    decoded.fill(0);
+                }
+            }
+
+            if (
+                !encryptedDEK ||
+                typeof encryptedDEK.encrypted !== "string" ||
+                !isCanonicalBase64(encryptedDEK.encrypted, 32) ||
+                !isCanonicalBase64(encryptedDEK.iv, 12) ||
+                !isCanonicalBase64(encryptedDEK.authTag, 16)
+            ) {
+                const error = new Error(
+                    "Invalid encrypted DEK metadata."
+                );
+                error.code = "BACKUP_METADATA_INVALID";
+                throw error;
+            }
+
+            const encryptedDEKBytes = Buffer.from(
+                encryptedDEK.encrypted,
+                "base64"
+            );
+
+            try {
+                if (
+                    encryptedDEKBytes.length !== 32 ||
+                    encryptedDEKBytes.toString("base64") !==
+                        encryptedDEK.encrypted
+                ) {
+                    const error = new Error(
+                        "Invalid encrypted DEK encoding."
+                    );
+                    error.code = "BACKUP_METADATA_INVALID";
+                    throw error;
+                }
+            } finally {
+                encryptedDEKBytes.fill(0);
             }
 
             const backupFilePath = path.join(
@@ -517,28 +739,195 @@ async function restoreBackup(userId, backupId) {
 
             const encryptedData = await fs.readFile(backupFilePath);
 
-            // readAndVerifyBackup already verified this hash.
-            if (!safeHashEquals(entry.encryptedSha256, sha256(encryptedData))) {
-                const error = new Error("Encrypted file integrity check failed.");
+            if (
+                !safeHashEquals(
+                    entry.encryptedSha256,
+                    sha256(encryptedData)
+                )
+            ) {
+                const error = new Error(
+                    "Encrypted file integrity check failed."
+                );
                 error.code = "BACKUP_INTEGRITY_FAILED";
                 throw error;
             }
 
-            // Generate a new name so restored files never overwrite existing ones.
+            // Check whether this backup item has already been tracked.
+            const [trackedItems] = await connection.execute(
+                `
+                SELECT restored_file_id
+                FROM backup_restore_items
+                WHERE user_id = ?
+                  AND backup_id = ?
+                  AND original_file_id = ?
+                LIMIT 1
+                FOR UPDATE
+                `,
+                [userId, backupId, metadata.originalFileId]
+            );
+
+            if (
+                trackedItems.length > 0 &&
+                trackedItems[0].restored_file_id !== null
+            ) {
+                // A foreign key ensures the referenced vault row exists.
+                // Do not create another copy.
+                skippedCount += 1;
+                continue;
+            }
+
+            // Find an exact metadata match. This also helps recognize
+            // files restored before the tracking table was introduced.
+            const [candidates] = await connection.execute(
+                `
+                SELECT
+                    file_id,
+                    storage_path
+                FROM vault_files
+                WHERE user_id = ?
+                  AND original_name = ?
+                  AND mime_type <=> ?
+                  AND file_size = ?
+                  AND file_hash = ?
+                  AND encryption_version = ?
+                  AND key_version = ?
+                  AND encrypted_dek = ?
+                  AND file_iv = ?
+                  AND file_auth_tag = ?
+                `,
+                [
+                    userId,
+                    metadata.originalName,
+                    metadata.mimeType,
+                    metadata.fileSize,
+                    metadata.fileHash,
+                    metadata.encryptionVersion,
+                    metadata.keyVersion,
+                    metadata.encryptedDek,
+                    metadata.fileIv,
+                    metadata.fileAuthTag
+                ]
+            );
+
+            let matchingFileId = null;
+
+            // Metadata alone is not enough. Confirm the existing stored
+            // ciphertext has exactly the same hash as the backup file.
+            for (const candidate of candidates) {
+                try {
+                    const realCandidatePath = await fs.realpath(
+                        candidate.storage_path
+                    );
+
+                    if (
+                        !isInsideDirectory(
+                            realEncryptedRoot,
+                            realCandidatePath
+                        )
+                    ) {
+                        continue;
+                    }
+
+                    const existingEncryptedData = await fs.readFile(
+                        realCandidatePath
+                    );
+
+                    try {
+                        if (
+                            safeHashEquals(
+                                entry.encryptedSha256,
+                                sha256(existingEncryptedData)
+                            )
+                        ) {
+                            matchingFileId = candidate.file_id;
+                            break;
+                        }
+                    } finally {
+                        existingEncryptedData.fill(0);
+                    }
+                } catch (candidateError) {
+                    // Missing or unreadable candidates are not treated
+                    // as a verified match. A new copy may be restored.
+                    if (
+                        candidateError.code !== "ENOENT" &&
+                        candidateError.code !== "ENOTDIR"
+                    ) {
+                        console.warn(
+                            "Could not verify an existing vault file:",
+                            candidateError.message
+                        );
+                    }
+                }
+            }
+
+            if (matchingFileId !== null) {
+                // Link the existing exact file to this backup item.
+                if (trackedItems.length > 0) {
+                    await connection.execute(
+                        `
+                        UPDATE backup_restore_items
+                        SET restored_file_id = ?
+                        WHERE user_id = ?
+                          AND backup_id = ?
+                          AND original_file_id = ?
+                        `,
+                        [
+                            matchingFileId,
+                            userId,
+                            backupId,
+                            metadata.originalFileId
+                        ]
+                    );
+                } else {
+                    await connection.execute(
+                        `
+                        INSERT INTO backup_restore_items
+                        (
+                            user_id,
+                            backup_id,
+                            original_file_id,
+                            restored_file_id
+                        )
+                        VALUES (?, ?, ?, ?)
+                        `,
+                        [
+                            userId,
+                            backupId,
+                            metadata.originalFileId,
+                            matchingFileId
+                        ]
+                    );
+                }
+
+                skippedCount += 1;
+                continue;
+            }
+
+            // No exact existing copy was found; create a new vault file.
             const storedName = `${crypto.randomUUID()}.vault`;
             const destinationPath = path.join(
                 realEncryptedRoot,
                 storedName
             );
 
-            if (!isInsideDirectory(realEncryptedRoot, destinationPath)) {
+            if (
+                !isInsideDirectory(
+                    realEncryptedRoot,
+                    destinationPath
+                )
+            ) {
                 throw new Error("Unsafe restore destination.");
             }
 
-            await fs.writeFile(destinationPath, encryptedData, { flag: "wx" });
+            await fs.writeFile(
+                destinationPath,
+                encryptedData,
+                { flag: "wx" }
+            );
+
             createdPaths.push(destinationPath);
 
-            await connection.execute(
+            const [insertResult] = await connection.execute(
                 `
                 INSERT INTO vault_files
                 (
@@ -561,9 +950,9 @@ async function restoreBackup(userId, backupId) {
                     userId,
                     metadata.originalName,
                     storedName,
-                    metadata.mimeType || null,
+                    metadata.mimeType,
                     metadata.fileSize,
-                    metadata.fileHash || null,
+                    metadata.fileHash,
                     metadata.encryptionVersion,
                     metadata.keyVersion,
                     metadata.encryptedDek,
@@ -573,29 +962,249 @@ async function restoreBackup(userId, backupId) {
                 ]
             );
 
+            const restoredFileId = insertResult.insertId;
+
+            if (trackedItems.length > 0) {
+                await connection.execute(
+                    `
+                    UPDATE backup_restore_items
+                    SET restored_file_id = ?
+                    WHERE user_id = ?
+                      AND backup_id = ?
+                      AND original_file_id = ?
+                    `,
+                    [
+                        restoredFileId,
+                        userId,
+                        backupId,
+                        metadata.originalFileId
+                    ]
+                );
+            } else {
+                await connection.execute(
+                    `
+                    INSERT INTO backup_restore_items
+                    (
+                        user_id,
+                        backup_id,
+                        original_file_id,
+                        restored_file_id
+                    )
+                    VALUES (?, ?, ?, ?)
+                    `,
+                    [
+                        userId,
+                        backupId,
+                        metadata.originalFileId,
+                        restoredFileId
+                    ]
+                );
+            }
+
             restoredCount += 1;
         }
 
+        commitAttempted = true;
         await connection.commit();
 
         return {
             backupId,
             restoredCount,
+            skippedCount,
             integrity: "VERIFIED",
-            message: "Backup restored successfully."
+            message:
+                restoredCount === 0
+                    ? "No new files restored; matching files were already present."
+                    : "Backup restored successfully."
         };
+
     } catch (error) {
+
+
+    // If commit was attempted, the database outcome may be uncertain.
+    // Preserve created files to avoid breaking successfully committed records.
+    if (!commitAttempted) {
         try {
             await connection.rollback();
+            rollbackSucceeded = true;
         } catch (rollbackError) {
-            console.error("RESTORE ROLLBACK ERROR:", rollbackError);
+            console.error(
+                "RESTORE ROLLBACK ERROR:",
+                rollbackError
+            );
         }
+    }
 
+    // Delete newly created files only after a confirmed rollback.
+    if (!commitAttempted && rollbackSucceeded) {
         for (const filePath of createdPaths) {
             try {
                 await fs.rm(filePath, { force: true });
             } catch (cleanupError) {
-                console.error("RESTORE FILE CLEANUP ERROR:", cleanupError);
+                console.error(
+                    "RESTORE FILE CLEANUP ERROR:",
+                    cleanupError
+                );
+                error.cleanupRequired = true;
+            }
+        }
+    } else {
+        error.code = "BACKUP_RESTORE_RECOVERY_REQUIRED";
+
+        console.error(
+            "RESTORE RECOVERY REQUIRED: encrypted files were preserved because the transaction outcome is uncertain.",
+            {
+                backupId,
+                createdPaths,
+                originalError: error.message
+            }
+        );
+    }
+
+    throw error;
+}
+        finally {
+        connection.release();
+    }
+}
+
+
+
+async function deleteBackup(userId, backupId) {
+    const connection = await pool.getConnection();
+
+    let backupPath = null;
+    let quarantinePath = null;
+    let transactionStarted = false;
+    let directoryQuarantined = false;
+    let transactionCommitted = false;
+
+    try {
+        await connection.beginTransaction();
+        transactionStarted = true;
+
+        // Lock the backup row to prevent concurrent deletion.
+        const [rows] = await connection.execute(
+            `
+            SELECT
+                backup_id,
+                backup_name,
+                backup_path,
+                status
+            FROM backups
+            WHERE backup_id = ?
+              AND user_id = ?
+            LIMIT 1
+            FOR UPDATE
+            `,
+            [backupId, userId]
+        );
+
+        if (rows.length === 0 || rows[0].status !== "COMPLETED") {
+            const error = new Error("Backup not found.");
+            error.code = "BACKUP_NOT_FOUND";
+            throw error;
+        }
+
+        const backup = rows[0];
+        backupPath = path.resolve(backup.backup_path);
+
+        // Validate the configured backup directory and backup name.
+        if (
+            !isInsideDirectory(BACKUP_ROOT_DIR, backupPath) ||
+            path.basename(backupPath) !== backup.backup_name ||
+            !/^backup-[a-f0-9]{32}$/i.test(backup.backup_name)
+        ) {
+            const error = new Error("Invalid backup directory.");
+            error.code = "BACKUP_INVALID_PATH";
+            throw error;
+        }
+
+        const realBackupRoot = await fs.realpath(BACKUP_ROOT_DIR);
+        const realBackupPath = await fs.realpath(backupPath);
+
+        if (
+            !isInsideDirectory(realBackupRoot, realBackupPath) ||
+            path.basename(realBackupPath) !== backup.backup_name
+        ) {
+            const error = new Error(
+                "Backup directory is outside storage."
+            );
+            error.code = "BACKUP_INVALID_PATH";
+            throw error;
+        }
+
+        const stat = await fs.stat(realBackupPath);
+
+        if (!stat.isDirectory()) {
+            const error = new Error(
+                "Backup path is not a directory."
+            );
+            error.code = "BACKUP_INVALID_PATH";
+            throw error;
+        }
+
+        // Move the directory to a temporary location first.
+        // This allows recovery if the database update fails.
+        quarantinePath = path.join(
+            realBackupRoot,
+            `.deleting-${backup.backup_id}-${crypto.randomBytes(12).toString("hex")}`
+        );
+
+        await fs.rename(realBackupPath, quarantinePath);
+        directoryQuarantined = true;
+
+        const [result] = await connection.execute(
+            `
+            UPDATE backups
+            SET status = 'DELETED',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE backup_id = ?
+              AND user_id = ?
+              AND status = 'COMPLETED'
+            `,
+            [backupId, userId]
+        );
+
+        if (result.affectedRows !== 1) {
+            const error = new Error(
+                "Backup status could not be updated."
+            );
+            error.code = "BACKUP_STATUS_UPDATE_FAILED";
+            throw error;
+        }
+
+        await connection.commit();
+        transactionCommitted = true;
+        transactionStarted = false;
+    } catch (error) {
+        if (transactionStarted) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error(
+                    "BACKUP DELETE DATABASE ROLLBACK ERROR:",
+                    rollbackError
+                );
+            }
+        }
+
+        // Restore the original directory if the DB transaction
+        // did not commit.
+        if (directoryQuarantined && !transactionCommitted) {
+            try {
+                await fs.rename(quarantinePath, backupPath);
+                directoryQuarantined = false;
+            } catch (recoveryError) {
+                console.error(
+                    "BACKUP DELETE FILE RECOVERY ERROR:",
+                    recoveryError
+                );
+
+                error.code = "BACKUP_DELETE_RECOVERY_REQUIRED";
+                error.message =
+                    "Backup deletion could not be completed safely. " +
+                    "The temporary backup directory may require recovery.";
             }
         }
 
@@ -603,56 +1212,36 @@ async function restoreBackup(userId, backupId) {
     } finally {
         connection.release();
     }
-}
 
-async function deleteBackup(userId, backupId) {
-    const [rows] = await pool.execute(
-        `
-        SELECT backup_id, backup_name, backup_path
-        FROM backups
-        WHERE backup_id = ?
-          AND user_id = ?
-          AND status = 'COMPLETED'
-        LIMIT 1
-        `,
-        [backupId, userId]
-    );
+    // The database now marks the backup as DELETED.
+    // Cleanup failure must not make the operation appear uncommitted.
+    if (directoryQuarantined && transactionCommitted) {
+        try {
+            await fs.rm(quarantinePath, {
+                recursive: true,
+                force: false
+            });
+        } catch (cleanupError) {
+            console.error(
+                "BACKUP DELETE CLEANUP ERROR:",
+                cleanupError
+            );
 
-    if (rows.length === 0) {
-        const error = new Error("Backup not found.");
-        error.code = "BACKUP_NOT_FOUND";
-        throw error;
+            const error = new Error(
+                "Backup is marked DELETED, but temporary directory " +
+                "cleanup failed. Manual storage cleanup may be required."
+            );
+            error.code = "BACKUP_FILES_CLEANUP_FAILED";
+            throw error;
+        }
     }
-
-    const backup = rows[0];
-    const backupPath = path.resolve(backup.backup_path);
-
-    if (
-        !isInsideDirectory(BACKUP_ROOT_DIR, backupPath) ||
-        path.basename(backupPath) !== backup.backup_name
-    ) {
-        const error = new Error("Invalid backup directory.");
-        error.code = "BACKUP_INVALID_PATH";
-        throw error;
-    }
-
-    await fs.rm(backupPath, { recursive: true, force: true });
-
-    await pool.execute(
-        `
-        UPDATE backups
-        SET status = 'DELETED',
-            updated_at = CURRENT_TIMESTAMP
-        WHERE backup_id = ? AND user_id = ?
-        `,
-        [backupId, userId]
-    );
 
     return {
         backupId,
         message: "Backup deleted successfully."
     };
 }
+
 
 module.exports = {
     createBackup,

@@ -13,45 +13,25 @@ const {
     getActiveKeyVersion
 } = require("./encryptionService");
 
-
-// =====================================================
-// STORAGE CONFIGURATION
-// =====================================================
-
-const ENCRYPTED_STORAGE_PATH = path.join(
+const ENCRYPTED_STORAGE_PATH = path.resolve(
     __dirname,
     "..",
     "storage",
     "encrypted"
 );
 
-
-// =====================================================
-// ENSURE STORAGE DIRECTORY
-// =====================================================
+const STORED_NAME_PATTERN =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.vault$/i;
 
 async function ensureStorageDirectory() {
-
-    await fs.mkdir(
-        ENCRYPTED_STORAGE_PATH,
-        {
-            recursive: true
-        }
-    );
+    await fs.mkdir(ENCRYPTED_STORAGE_PATH, {
+        recursive: true
+    });
 }
 
-
-// =====================================================
-// CALCULATE SHA-256 FILE HASH
-// =====================================================
-
 function calculateFileHash(buffer) {
-
     if (!Buffer.isBuffer(buffer)) {
-
-        throw new Error(
-            "INVALID_FILE_BUFFER"
-        );
+        throw new Error("INVALID_FILE_BUFFER");
     }
 
     return crypto
@@ -60,117 +40,119 @@ function calculateFileHash(buffer) {
         .digest("hex");
 }
 
+/**
+ * Resolve only the expected file inside encrypted storage.
+ * Reject database paths that point anywhere else.
+ */
+async function resolveStoredFilePath(file, options = {}) {
+    const { allowMissing = false } = options;
 
-// =====================================================
-// SAVE ENCRYPTED FILE
-// =====================================================
-
-async function saveEncryptedFile(
-    userId,
-    file
-) {
-
-    if (!file || !file.buffer) {
-
-        throw new Error(
-            "FILE_DATA_REQUIRED"
-        );
+    if (
+        !file ||
+        typeof file.stored_name !== "string" ||
+        !STORED_NAME_PATTERN.test(file.stored_name) ||
+        typeof file.storage_path !== "string"
+    ) {
+        throw new Error("INVALID_STORAGE_PATH");
     }
 
+    const rootPath = await fs.realpath(ENCRYPTED_STORAGE_PATH);
+    const expectedPath = path.resolve(rootPath, file.stored_name);
+    const databasePath = path.resolve(file.storage_path);
+
+    // The database path must exactly match the expected stored filename.
+    if (
+        path.relative(rootPath, expectedPath).startsWith("..") ||
+        path.isAbsolute(path.relative(rootPath, expectedPath)) ||
+        databasePath !== expectedPath
+    ) {
+        throw new Error("INVALID_STORAGE_PATH");
+    }
+
+    let actualPath;
+
+    try {
+        actualPath = await fs.realpath(expectedPath);
+    } catch (error) {
+        if (allowMissing && error.code === "ENOENT") {
+            return expectedPath;
+        }
+
+        if (error.code === "ENOENT") {
+            throw new Error("STORED_FILE_MISSING");
+        }
+
+        throw error;
+    }
+
+    const relativeActualPath = path.relative(rootPath, actualPath);
+
+    if (
+        relativeActualPath === "" ||
+        relativeActualPath.startsWith("..") ||
+        path.isAbsolute(relativeActualPath)
+    ) {
+        throw new Error("INVALID_STORAGE_PATH");
+    }
+
+    const stat = await fs.stat(actualPath);
+
+    if (!stat.isFile()) {
+        throw new Error("INVALID_STORAGE_PATH");
+    }
+
+    return actualPath;
+}
+
+async function saveEncryptedFile(userId, file) {
+    if (
+        !file ||
+        !Buffer.isBuffer(file.buffer) ||
+        typeof file.originalname !== "string"
+    ) {
+        throw new Error("FILE_DATA_REQUIRED");
+    }
 
     await ensureStorageDirectory();
 
+    const fileHash = calculateFileHash(file.buffer);
+    const storedName = `${crypto.randomUUID()}.vault`;
+    const storagePath = path.join(
+        ENCRYPTED_STORAGE_PATH,
+        storedName
+    );
 
-    // -------------------------------------------------
-    // Calculate SHA-256 BEFORE encryption
-    // -------------------------------------------------
+    const keyVersion = getActiveKeyVersion();
+    const fileKey = generateFileKey();
 
-    const fileHash =
-        calculateFileHash(
-            file.buffer
-        );
+    let encryptedFileWritten = false;
 
-
-    // -------------------------------------------------
-    // Generate unique stored filename
-    // -------------------------------------------------
-
-    const storedName =
-        crypto.randomUUID() + ".vault";
-
-
-    const storagePath =
-        path.join(
-            ENCRYPTED_STORAGE_PATH,
-            storedName
-        );
-
-
-    // -------------------------------------------------
-    // Get active master-key version
-    // -------------------------------------------------
-
-    const keyVersion =
-        getActiveKeyVersion();
-
-
-    // -------------------------------------------------
-    // Generate unique file encryption key
-    // -------------------------------------------------
-
-    const fileKey =
-        generateFileKey();
-
-
-    // -------------------------------------------------
-    // Encrypt file using DEK
-    // -------------------------------------------------
-
-    const encryptedFile =
-        encryptData(
+    try {
+        const encryptedFile = encryptData(
             file.buffer,
             fileKey
         );
 
-
-    // -------------------------------------------------
-    // Encrypt DEK using active master key
-    // -------------------------------------------------
-
-    const encryptedDEK =
-        encryptFileKey(
+        const encryptedDEK = encryptFileKey(
             fileKey,
             keyVersion
         );
 
+        await fs.writeFile(
+            storagePath,
+            encryptedFile.encrypted,
+            { flag: "wx", mode: 0o600 }
+        );
 
-    // -------------------------------------------------
-    // Clear DEK from memory after wrapping
-    // -------------------------------------------------
+        encryptedFileWritten = true;
 
-    fileKey.fill(0);
+        const encryptedDEKJSON = JSON.stringify({
+            encrypted: encryptedDEK.encrypted.toString("base64"),
+            iv: encryptedDEK.iv,
+            authTag: encryptedDEK.authTag
+        });
 
-
-    // -------------------------------------------------
-    // Write encrypted file
-    // -------------------------------------------------
-
-    await fs.writeFile(
-        storagePath,
-        encryptedFile.encrypted
-    );
-
-
-    try {
-
-        // -------------------------------------------------
-        // Save metadata
-        // -------------------------------------------------
-
-        const [
-            result
-        ] = await pool.execute(
-
+        const [result] = await pool.execute(
             `
             INSERT INTO vault_files
             (
@@ -187,124 +169,53 @@ async function saveEncryptedFile(
                 file_auth_tag,
                 storage_path
             )
-            VALUES
-            (
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?,
-                ?
-            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
-
             [
-
                 userId,
-
                 file.originalname,
-
                 storedName,
-
                 file.mimetype || null,
-
                 file.size,
-
                 fileHash,
-
                 "v1",
-
                 keyVersion,
-
-                JSON.stringify({
-
-                    encrypted:
-                        encryptedDEK.encrypted.toString(
-                            "base64"
-                        ),
-
-                    iv:
-                        encryptedDEK.iv,
-
-                    authTag:
-                        encryptedDEK.authTag
-
-                }),
-
+                encryptedDEKJSON,
                 encryptedFile.iv,
-
                 encryptedFile.authTag,
-
                 storagePath
-
             ]
-
         );
 
-
         return {
-
-            fileId:
-                result.insertId,
-
-            originalName:
-                file.originalname,
-
+            fileId: result.insertId,
+            originalName: file.originalname,
             storedName,
-
-            mimeType:
-                file.mimetype || null,
-
-            fileSize:
-                file.size,
-
+            mimeType: file.mimetype || null,
+            fileSize: file.size,
             keyVersion,
-
             fileHash
-
         };
-
     } catch (error) {
-
-        // -------------------------------------------------
-        // Remove encrypted file if DB insertion fails
-        // -------------------------------------------------
-
-        try {
-
-            await fs.unlink(
-                storagePath
-            );
-
-        } catch (_) {
-
-            // Ignore cleanup error
+        if (encryptedFileWritten) {
+            try {
+                await fs.unlink(storagePath);
+            } catch (cleanupError) {
+                console.error(
+                    "Encrypted-file cleanup failed:",
+                    cleanupError.message
+                );
+            }
         }
 
-
         throw error;
+    } finally {
+        fileKey.fill(0);
     }
 }
 
-
-// =====================================================
-// GET USER FILES
-// =====================================================
-
-async function getUserFiles(
-    userId
-) {
-
-    const [
-        rows
-    ] = await pool.execute(
-
+async function getUserFiles(userId) {
+    const [rows] = await pool.execute(
         `
         SELECT
             file_id,
@@ -320,29 +231,14 @@ async function getUserFiles(
         WHERE user_id = ?
         ORDER BY created_at DESC
         `,
-
         [userId]
-
     );
-
 
     return rows;
 }
 
-
-// =====================================================
-// GET FILE METADATA
-// =====================================================
-
-async function getUserFile(
-    userId,
-    fileId
-) {
-
-    const [
-        rows
-    ] = await pool.execute(
-
+async function getUserFile(userId, fileId) {
+    const [rows] = await pool.execute(
         `
         SELECT
             file_id,
@@ -362,283 +258,175 @@ async function getUserFile(
             updated_at
         FROM vault_files
         WHERE file_id = ?
-        AND user_id = ?
+          AND user_id = ?
         LIMIT 1
         `,
-
-        [
-            fileId,
-            userId
-        ]
-
+        [fileId, userId]
     );
 
-
-    if (rows.length === 0) {
-
-        return null;
-    }
-
-
-    return rows[0];
+    return rows.length ? rows[0] : null;
 }
 
-
-// =====================================================
-// READ AND DECRYPT FILE
-// =====================================================
-
-async function readDecryptedFile(
-    userId,
-    fileId
-) {
-
-    const file =
-        await getUserFile(
-            userId,
-            fileId
-        );
-
+async function readDecryptedFile(userId, fileId) {
+    const file = await getUserFile(userId, fileId);
 
     if (!file) {
-
-        const error =
-            new Error(
-                "FILE_NOT_FOUND"
-            );
-
-        throw error;
+        throw new Error("FILE_NOT_FOUND");
     }
 
+    const safePath = await resolveStoredFilePath(file);
+    const encryptedFile = await fs.readFile(safePath);
 
-    // -------------------------------------------------
-    // Read encrypted file
-    // -------------------------------------------------
+    let encryptedDEK;
 
-    const encryptedFile =
-        await fs.readFile(
-            file.storage_path
-        );
-
-
-    // -------------------------------------------------
-    // Decode encrypted DEK
-    // -------------------------------------------------
-
-    const encryptedDEK =
-        typeof file.encrypted_dek === "string"
-            ? JSON.parse(file.encrypted_dek)
-            : file.encrypted_dek;
-
+    try {
+        encryptedDEK =
+            typeof file.encrypted_dek === "string"
+                ? JSON.parse(file.encrypted_dek)
+                : file.encrypted_dek;
+    } catch {
+        throw new Error("INVALID_ENCRYPTED_FILE_KEY");
+    }
 
     if (
         !encryptedDEK ||
-        !encryptedDEK.encrypted ||
-        !encryptedDEK.iv ||
-        !encryptedDEK.authTag
+        typeof encryptedDEK.encrypted !== "string" ||
+        typeof encryptedDEK.iv !== "string" ||
+        typeof encryptedDEK.authTag !== "string"
     ) {
-
-        throw new Error(
-            "INVALID_ENCRYPTED_FILE_KEY"
-        );
+        throw new Error("INVALID_ENCRYPTED_FILE_KEY");
     }
 
+        if (
+        !encryptedDEK ||
+        typeof encryptedDEK.encrypted !== "string" ||
+        typeof encryptedDEK.iv !== "string" ||
+        typeof encryptedDEK.authTag !== "string"
+    ) {
+        throw new Error("INVALID_ENCRYPTED_FILE_KEY");
+    }
 
-    const encryptedKey =
-        Buffer.from(
-            encryptedDEK.encrypted,
-            "base64"
-        );
+    // Validate canonical Base64 before decoding the encrypted DEK.
+    const encryptedValue = encryptedDEK.encrypted;
 
+    if (
+        encryptedValue.length === 0 ||
+        encryptedValue.length % 4 !== 0 ||
+        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+            encryptedValue
+        )
+    ) {
+        throw new Error("INVALID_ENCRYPTED_FILE_KEY");
+    }
 
-    // -------------------------------------------------
-    // Decrypt DEK using its stored key version
-    // -------------------------------------------------
+    const encryptedKey = Buffer.from(
+        encryptedValue,
+        "base64"
+    );
 
-    const fileKey =
-        decryptFileKey(
+    if (
+        encryptedKey.length !== 32 ||
+        encryptedKey.toString("base64") !== encryptedValue
+    ) {
+        encryptedKey.fill(0);
+        throw new Error("INVALID_ENCRYPTED_FILE_KEY");
+    }
+
+    let fileKey;
+
+    try {
+        fileKey = decryptFileKey(
             encryptedKey,
             encryptedDEK.iv,
             encryptedDEK.authTag,
             file.key_version
         );
 
+        const decryptedFile = decryptData(
+            encryptedFile,
+            fileKey,
+            file.file_iv,
+            file.file_auth_tag
+        );
 
-    let decryptedFile;
+        if (file.file_hash) {
+            const calculatedHash = calculateFileHash(decryptedFile);
+            const storedHash = String(file.file_hash).toLowerCase();
 
-    try {
+            if (!/^[a-f0-9]{64}$/.test(storedHash)) {
+                throw new Error("FILE_INTEGRITY_CHECK_FAILED");
+            }
 
-        // -------------------------------------------------
-        // Decrypt file using DEK
-        // -------------------------------------------------
+            const calculatedBuffer = Buffer.from(calculatedHash, "hex");
+            const storedBuffer = Buffer.from(storedHash, "hex");
 
-        decryptedFile =
-            decryptData(
-                encryptedFile,
-                fileKey,
-                file.file_iv,
-                file.file_auth_tag
-            );
-
-    } finally {
-
-        // -------------------------------------------------
-        // Clear DEK from memory
-        // -------------------------------------------------
-
-        fileKey.fill(0);
-    }
-
-
-    // -------------------------------------------------
-    // FILE INTEGRITY VERIFICATION
-    // -------------------------------------------------
-
-    if (file.file_hash) {
-
-        const calculatedHash =
-            calculateFileHash(
-                decryptedFile
-            );
-
-
-        const storedHash =
-            String(
-                file.file_hash
-            ).toLowerCase();
-
-
-        const calculatedHashBuffer =
-            Buffer.from(
-                calculatedHash,
-                "hex"
-            );
-
-        const storedHashBuffer =
-            Buffer.from(
-                storedHash,
-                "hex"
-            );
-
-
-        if (
-            calculatedHashBuffer.length !==
-            storedHashBuffer.length ||
-            !crypto.timingSafeEqual(
-                calculatedHashBuffer,
-                storedHashBuffer
-            )
-        ) {
-
-            const error =
-                new Error(
-                    "FILE_INTEGRITY_CHECK_FAILED"
-                );
-
-            throw error;
+            if (!crypto.timingSafeEqual(calculatedBuffer, storedBuffer)) {
+                throw new Error("FILE_INTEGRITY_CHECK_FAILED");
+            }
         }
 
+        return {
+            file,
+            data: decryptedFile
+        };
+    } finally {
+        if (fileKey) {
+            fileKey.fill(0);
+        }
+
+        encryptedKey.fill(0);
     }
-
-
-    return {
-
-        file,
-
-        data:
-            decryptedFile
-
-    };
 }
 
-
-// =====================================================
-// DELETE FILE
-// =====================================================
-
-async function deleteUserFile(
-    userId,
-    fileId
-) {
-
-    const file =
-        await getUserFile(
-            userId,
-            fileId
-        );
-
+async function deleteUserFile(userId, fileId) {
+    const file = await getUserFile(userId, fileId);
 
     if (!file) {
-
-        const error =
-            new Error(
-                "FILE_NOT_FOUND"
-            );
-
-        throw error;
+        throw new Error("FILE_NOT_FOUND");
     }
 
+    // Validate the path before modifying either storage or the database.
+    const safePath = await resolveStoredFilePath(file, {
+        allowMissing: true
+    });
 
-    // -------------------------------------------------
-    // Delete physical encrypted file
-    // -------------------------------------------------
-
-    try {
-
-        await fs.unlink(
-            file.storage_path
-        );
-
-    } catch (error) {
-
-        if (
-            error.code !==
-            "ENOENT"
-        ) {
-
-            throw error;
-        }
-    }
-
-
-    // -------------------------------------------------
-    // Delete database record
-    // -------------------------------------------------
-
-    await pool.execute(
-
+    // Remove the metadata first. This also lets database foreign-key
+    // rules handle related records consistently.
+    const [result] = await pool.execute(
         `
         DELETE FROM vault_files
         WHERE file_id = ?
-        AND user_id = ?
+          AND user_id = ?
         `,
-
-        [
-            fileId,
-            userId
-        ]
-
+        [fileId, userId]
     );
 
+    if (result.affectedRows === 0) {
+        throw new Error("FILE_NOT_FOUND");
+    }
+
+    // A failed unlink leaves an orphaned encrypted file, not a database
+    // record that points to a file that has already been removed.
+    try {
+        await fs.unlink(safePath);
+    } catch (error) {
+        if (error.code !== "ENOENT") {
+            console.error(
+                "Encrypted-file deletion failed:",
+                error.message
+            );
+
+            throw new Error("ENCRYPTED_FILE_CLEANUP_FAILED");
+        }
+    }
 
     return true;
 }
 
-
-// =====================================================
-// EXPORTS
-// =====================================================
-
 module.exports = {
-
     saveEncryptedFile,
-
     getUserFiles,
-
     getUserFile,
-
     readDecryptedFile,
-
     deleteUserFile
-
 };

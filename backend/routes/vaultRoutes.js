@@ -1,92 +1,59 @@
-const express = require("express");
 
+const express = require("express");
 const router = express.Router();
 
+const authMiddleware = require("../middleware/authMiddleware");
+const vaultLockMiddleware = require("../middleware/vaultLockMiddleware");
 
-// =====================================================
-// MIDDLEWARE
-// =====================================================
-
-const authMiddleware =
-    require("../middleware/authMiddleware");
-
-const vaultLockMiddleware =
-    require("../middleware/vaultLockMiddleware");
-
-const upload =
-    require("../middleware/uploadMiddleware");
-
-
-
-
-// =====================================================
-// CONTROLLER
-// =====================================================
-
-
-
+const {
+    upload,
+    validateUploadBatch
+} = require("../middleware/uploadMiddleware");
 
 const {
     uploadFiles,
     listFiles,
-    downloadFile,
+
+    viewFile,
     deleteFile,
+    restoreFile,
     getLockStatus,
+    getFileCount,
     unlock,
     lock
 } = require("../controllers/vaultController");
 
-
-// =====================================================
 // VAULT LOCK STATUS
-// =====================================================
-
 router.get(
     "/status",
     authMiddleware,
     getLockStatus
 );
 
-
-// =====================================================
 // UNLOCK VAULT
-// =====================================================
-
 router.post(
     "/unlock",
     authMiddleware,
     unlock
 );
 
-
-// =====================================================
 // LOCK VAULT
-// =====================================================
-
 router.post(
     "/lock",
     authMiddleware,
     lock
 );
 
-
-// =====================================================
-// MULTIPLE FILE UPLOAD
-// =====================================================
-
+// UPLOAD FILES: login required, vault unlock NOT required
 router.post(
     "/upload",
     authMiddleware,
-    vaultLockMiddleware,
     upload.array("files", 10),
+    validateUploadBatch,
     uploadFiles
 );
 
-
-// =====================================================
-// LIST FILES
-// =====================================================
-
+// LIST FILES: vault unlock required
 router.get(
     "/files",
     authMiddleware,
@@ -95,28 +62,34 @@ router.get(
 );
 
 
-// =====================================================
-// DOWNLOAD
-// =====================================================
 
-router.get(
-    "/files/:fileId/download",
+router.post(
+    "/files/:fileId/restore",
     authMiddleware,
     vaultLockMiddleware,
-    downloadFile
+    restoreFile
 );
 
+// FILE COUNT: login required, vault unlock NOT required
+router.get(
+    "/files/count",
+    authMiddleware,
+    getFileCount
+);
 
-// =====================================================
-// DELETE
-// =====================================================
-
+// VIEW FILE: login and unlocked vault required
+router.get(
+    "/files/:fileId/view",
+    authMiddleware,
+    vaultLockMiddleware,
+    viewFile
+);
+// DELETE FILE: vault unlock required
 router.delete(
     "/files/:fileId",
     authMiddleware,
     vaultLockMiddleware,
     deleteFile
 );
-
 
 module.exports = router;
